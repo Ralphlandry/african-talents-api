@@ -1,0 +1,20 @@
+Django>=5.2,<5.3
+djangorestframework>=3.15,<4
+djangorestframework-simplejwt>=5.3,<6
+django-filter>=24.3
+drf-spectacular>=0.27
+django-cors-headers>=4.4
+psycopg[binary]>=3.2
+dj-database-url>=2.2
+django-redis>=5.4
+redis>=5.0
+celery>=5.4,<6
+gunicorn>=22.0
+whitenoise>=6.7
+Pillow>=10.4
+nh3>=0.2.18
+# Intégration HR-Skills Pay : appels HTTP directs contre le contrat documenté (voir
+# apps/payments/gateway.py). Je n'ai pas pu vérifier l'API Python exacte du SDK officiel
+# `hrpay` sans accès réseau ; implémenter contre les endpoints/headers documentés plutôt
+# que deviner des noms de méthode de SDK est le choix le plus sûr et le plus vérifiable.
+requests>=2.32,<3

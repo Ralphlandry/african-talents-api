@@ -1,0 +1,97 @@
+# Base « type production » : image sans code monté, gunicorn, secrets via .env.
+# En développement, .env active aussi docker-compose.dev.yml (COMPOSE_FILE).
+name: african-talents
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-african_talents}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-african_talents}
+  REDIS_URL: redis://redis:6379/0
+  MEDIA_ROOT: /data/media
+  STATIC_ROOT: /data/static
+  DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.prod}
+
+x-backend: &backend
+  build:
+    context: .
+    args:
+      REQUIREMENTS: ${REQUIREMENTS:-base}
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - media_data:/data/media
+    - static_data:/data/static
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-african_talents}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-african_talents}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-african_talents} -d ${POSTGRES_DB:-african_talents}"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 120s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    <<: *backend
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "1"
+      RUN_COLLECTSTATIC: "1"
+      AUTO_MAKEMIGRATIONS: "0"
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  worker:
+    <<: *backend
+    command: ["celery", "-A", "config", "worker", "-l", "info"]
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+      AUTO_MAKEMIGRATIONS: "0"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  beat:
+    <<: *backend
+    command: ["celery", "-A", "config", "beat", "-l", "info", "--schedule", "/tmp/celerybeat-schedule"]
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+      AUTO_MAKEMIGRATIONS: "0"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  media_data:
+  static_data:

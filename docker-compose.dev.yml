@@ -1,0 +1,38 @@
+# Surcharge de développement : code monté, rechargement automatique, dépendances de test, port PostgreSQL local.
+x-dev-env: &dev-env
+  DJANGO_SETTINGS_MODULE: config.settings.dev
+
+services:
+  db:
+    ports:
+      - "127.0.0.1:${AFRICAN_TALENTS_DB_PORT:-5433}:5432"
+
+  backend:
+    build:
+      args:
+        REQUIREMENTS: dev
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    volumes:
+      - .:/app
+    environment:
+      <<: *dev-env
+      RUN_COLLECTSTATIC: "0"
+      AUTO_MAKEMIGRATIONS: ${AUTO_MAKEMIGRATIONS:-1}
+
+  worker:
+    build:
+      args:
+        REQUIREMENTS: dev
+    volumes:
+      - .:/app
+    environment:
+      <<: *dev-env
+
+  beat:
+    build:
+      args:
+        REQUIREMENTS: dev
+    volumes:
+      - .:/app
+    environment:
+      <<: *dev-env
