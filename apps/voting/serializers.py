@@ -1,3 +1,4 @@
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 
 from apps.candidates.models import Candidate
@@ -50,10 +51,30 @@ class VoteOrderCreateSerializer(serializers.Serializer):
         slug_field="slug", queryset=Candidate.objects.filter(status=Candidate.PUBLISHED, is_active=True)
     )
     vote_package = serializers.PrimaryKeyRelatedField(queryset=VotePackage.objects.filter(is_active=True))
-    phone = serializers.RegexField(r"^\+?[0-9]{9,15}$")
-    operator = serializers.ChoiceField(choices=["MTN", "ORANGE"])
+    phone = serializers.RegexField(r"^\+?[0-9]{9,15}$", required=False, allow_blank=True)
+    operator = serializers.ChoiceField(choices=["MTN", "ORANGE", "CARD"], required=False)
+    payment_method = serializers.ChoiceField(choices=["CARD", "MTN", "ORANGE"], required=False)
     idempotency_key = serializers.CharField(max_length=100)
     accept_terms = serializers.BooleanField()
+
+    def validate(self, attrs):
+        payment_method = attrs.pop("payment_method", None)
+        operator = attrs.get("operator")
+        if payment_method:
+            if operator and operator != payment_method:
+                raise serializers.ValidationError({"payment_method": "Le moyen de paiement ne correspond pas à l'opérateur."})
+            operator = payment_method
+        if operator not in ("MTN", "ORANGE", "CARD"):
+            raise serializers.ValidationError({"payment_method": "Choisissez un moyen de paiement valide."})
+        phone = attrs.get("phone", "")
+        if operator == "CARD":
+            if phone:
+                raise serializers.ValidationError({"phone": "Le paiement par carte ne nécessite pas de numéro Mobile Money."})
+            attrs["phone"] = ""
+        elif not phone:
+            raise serializers.ValidationError({"phone": "Le numéro de téléphone est obligatoire pour Mobile Money."})
+        attrs["operator"] = operator
+        return attrs
 
     def validate_accept_terms(self, value):
         if not value:
@@ -64,14 +85,22 @@ class VoteOrderCreateSerializer(serializers.Serializer):
 class VoteOrderStatusSerializer(serializers.ModelSerializer):
     candidate_name = serializers.CharField(source="candidate.display_name", read_only=True)
     candidate_code = serializers.CharField(source="candidate.code", read_only=True)
+    checkout_url = serializers.SerializerMethodField()
 
     class Meta:
         model = VoteOrder
         fields = [
             "order_number", "status", "quantity", "amount_xaf", "operator",
-            "candidate_code", "candidate_name", "created_at",
+            "candidate_code", "candidate_name", "created_at", "checkout_url",
         ]
         read_only_fields = fields
+
+    def get_checkout_url(self, obj):
+        try:
+            payment = obj.payment
+        except ObjectDoesNotExist:
+            return None
+        return payment.checkout_url or None
 
 
 class VoteRecordSerializer(serializers.ModelSerializer):

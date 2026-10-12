@@ -13,7 +13,8 @@ from apps.voting.models import Vote, VoteOrder
 
 class FakeGatewayClient:
     def __init__(self, payin_result=None, status_result=None, transactions=None,
-                 wallet_balance=None, wallet_movements=None, raise_on_payin=None, raise_on_status=None):
+                 wallet_balance=None, wallet_movements=None, raise_on_payin=None, raise_on_status=None,
+                 card_result=None, card_status_result=None):
         self.payin_result = payin_result or {"status": "PENDING", "provider_reference": "HRS-1", "fees_xaf": None, "net_amount_xaf": None}
         self.status_result = status_result
         self.transactions = transactions or []
@@ -21,6 +22,11 @@ class FakeGatewayClient:
         self.wallet_movements = wallet_movements or []
         self.raise_on_payin = raise_on_payin
         self.raise_on_status = raise_on_status
+        self.card_result = card_result or {
+            "status": "PENDING", "provider_reference": "CARD-1",
+            "checkout_url": "https://pay.enkap.cm/checkout/CARD-1",
+        }
+        self.card_status_result = card_status_result
         self.refund_calls = []
 
     def create_mobile_money_payin(self, **kwargs):
@@ -32,6 +38,14 @@ class FakeGatewayClient:
         if self.raise_on_status:
             raise self.raise_on_status
         return self.status_result
+
+    def create_card_payment(self, **kwargs):
+        self.card_kwargs = kwargs
+        return self.card_result
+
+    def get_card_payment_status(self, reference):
+        self.card_status_reference = reference
+        return self.card_status_result
 
     def list_transactions(self, **kwargs):
         return self.transactions
@@ -76,6 +90,32 @@ def test_initiate_payment_creates_pending_payment(monkeypatch, order):
     assert payment.status == Payment.PENDING
     assert payment.provider_reference == "HRS-42"
     assert payment.reference == order.order_number
+
+
+@pytest.mark.django_db
+def test_initiate_card_payment_creates_hosted_checkout(monkeypatch, order, settings):
+    from apps.payments import services
+
+    settings.HRSKILLS_CARD_ENABLED = True
+    settings.HRSKILLS_CARD_RETURN_URL = "https://talents.example/paiement/retour"
+    settings.HRSKILLS_PUBLIC_KEY = "hrsk_pk_test_card"
+    settings.HRSKILLS_SECRET_KEY = "hrsk_sk_test_card"
+    order.operator = "CARD"
+    order.customer_phone = ""
+    order.save(update_fields=["operator", "customer_phone", "updated_at"])
+    fake = FakeGatewayClient()
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+
+    payment = services.initiate_payment(order)
+
+    assert payment.provider == "hrskills_pay_card"
+    assert payment.provider_reference == "CARD-1"
+    assert payment.checkout_url == "https://pay.enkap.cm/checkout/CARD-1"
+    assert fake.card_kwargs["amount_xaf"] == order.amount_xaf
+    assert fake.card_kwargs["currency"] == "XAF"
+    assert fake.card_kwargs["idempotency_key"] == order.idempotency_key
+    assert f"order_number={order.order_number}" in fake.card_kwargs["return_url"]
+    assert f"order_number={order.order_number}" in fake.card_kwargs["cancel_url"]
 
 
 @pytest.mark.django_db
@@ -149,6 +189,50 @@ def test_replaying_the_same_status_does_not_duplicate_votes(order, make_payment)
     services.apply_status(payment, Payment.SUCCESS)
     services.apply_status(payment, Payment.SUCCESS)  # rejeu : ne doit rien faire de plus
     assert Vote.objects.filter(vote_order=order).count() == 1
+
+
+@pytest.mark.django_db
+def test_card_status_is_verified_and_capture_credits_votes(monkeypatch, order, make_payment, settings):
+    from apps.payments import services
+
+    payment = make_payment(order, status=Payment.PENDING, provider="hrskills_pay_card", provider_reference="CARD-42")
+    fake = FakeGatewayClient(card_status_result={
+        "status": "CAPTURED", "amount_xaf": order.amount_xaf, "currency": "XAF",
+    })
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+
+    result = services.refresh_pending_payment(payment)
+
+    order.refresh_from_db()
+    assert result.status == Payment.SUCCESS
+    assert order.status == VoteOrder.PAID
+    assert fake.card_status_reference == "CARD-42"
+    assert Vote.objects.get(vote_order=order).quantity == order.quantity
+
+
+@pytest.mark.django_db
+def test_card_webhook_looks_up_provider_reference_and_reverifies(monkeypatch, order, make_payment, settings):
+    from apps.payments import services
+
+    settings.HRSKILLS_WEBHOOK_SECRET = "card-webhook-secret"
+    payment = make_payment(order, status=Payment.PENDING, provider="hrskills_pay_card", provider_reference="CARD-43")
+    fake = FakeGatewayClient(card_status_result={
+        "status": "CAPTURED", "amount_xaf": order.amount_xaf, "currency": "XAF",
+    })
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+    body = json.dumps({
+        "event_id": "card-event-43",
+        "reference": "CARD-43",
+        "event_type": "card_payment.succeeded",
+    }).encode()
+
+    event = services.handle_webhook(body, sign(body, settings.HRSKILLS_WEBHOOK_SECRET))
+
+    payment.refresh_from_db()
+    assert event.processed is True
+    assert payment.status == Payment.SUCCESS
+    assert fake.card_status_reference == "CARD-43"
+    assert Vote.objects.get(vote_order=order).quantity == order.quantity
 
 
 @pytest.mark.django_db

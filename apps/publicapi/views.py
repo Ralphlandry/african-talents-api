@@ -15,6 +15,8 @@ from apps.core.models import SiteSettings
 from apps.core.throttles import VoteOrderRateThrottle
 from apps.news.models import NewsPost
 from apps.partners.models import Partner
+from apps.payments.models import Payment
+from apps.payments.gateway import card_payments_enabled
 from apps.payments.services import initiate_payment, refresh_pending_payment
 from apps.team.models import TeamMember
 from apps.voting.models import VoteOrder, VotePackage
@@ -196,9 +198,22 @@ class PublicVotePackageListView(PublicReadOnlyMixin, ListAPIView):
 
 
 @extend_schema(tags=["public"])
+class PublicPaymentMethodsView(PublicReadOnlyMixin, APIView):
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    def get(self, request):
+        methods = [
+            {"id": "ORANGE", "name": "Orange Money", "icon": "OM"},
+            {"id": "MTN", "name": "MTN Mobile Money", "icon": "MTN"},
+        ]
+        if card_payments_enabled():
+            methods.append({"id": "CARD", "name": "Visa / Mastercard", "icon": "VISA · MC"})
+        return Response({"methods": methods})
+
+
+@extend_schema(tags=["public"])
 class PublicVoteOrderCreateView(PublicReadOnlyMixin, APIView):
     """
-    Crée une commande de vote puis initie le paiement Mobile Money. Le montant vient
+    Crée une commande de vote puis initie Mobile Money ou un checkout carte hébergé. Le montant vient
     TOUJOURS du VotePackage résolu côté serveur (jamais d'un prix envoyé par le client).
     Idempotent : rejouer la même idempotency_key (double-clic réseau) renvoie la même commande.
     """
@@ -211,6 +226,9 @@ class PublicVoteOrderCreateView(PublicReadOnlyMixin, APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        if data["operator"] == "CARD" and not card_payments_enabled():
+            raise ServiceUnavailableError("Le paiement par carte est désactivé.", code="CARD_PAYMENTS_DISABLED")
+
         order, created = create_order(
             candidate=data["candidate"], vote_package=data["vote_package"], phone=data["phone"],
             operator=data["operator"], idempotency_key=data["idempotency_key"], request=request,
@@ -219,7 +237,7 @@ class PublicVoteOrderCreateView(PublicReadOnlyMixin, APIView):
             try:
                 initiate_payment(order, request=request)
             except ServiceUnavailableError:
-                pass  # l'échec est déjà reflété sur le statut de la commande (FAILED) ; le client le lit via le polling
+                pass  # L'échec d'initiation est déjà reflété par le statut FAILED.
             order.refresh_from_db()
         return Response(VoteOrderStatusSerializer(order).data, status=201 if created else 200)
 
@@ -237,6 +255,12 @@ class PublicVoteOrderStatusView(PublicReadOnlyMixin, RetrieveAPIView):
     def retrieve(self, request, *args, **kwargs):
         order = self.get_object()
         if order.status == VoteOrder.PENDING:
-            refresh_pending_payment(order.payment, request=request)
-            order.refresh_from_db()
+            try:
+                payment = order.payment
+            except Payment.DoesNotExist:
+                pass
+            else:
+                refresh_pending_payment(payment, request=request)
+            finally:
+                order.refresh_from_db()
         return Response(self.get_serializer(order).data)

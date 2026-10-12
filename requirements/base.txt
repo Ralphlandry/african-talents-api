@@ -18,3 +18,4 @@ nh3>=0.2.18
 # `hrpay` sans accès réseau ; implémenter contre les endpoints/headers documentés plutôt
 # que deviner des noms de méthode de SDK est le choix le plus sûr et le plus vérifiable.
 requests>=2.32,<3
+reportlab>=4.2,<5

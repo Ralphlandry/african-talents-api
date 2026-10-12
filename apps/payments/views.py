@@ -52,7 +52,9 @@ class HRSkillsWebhookView(APIView):
 
 @extend_schema(tags=["payments"])
 class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Payment.objects.select_related("vote_order", "vote_order__candidate")
+    queryset = Payment.objects.select_related(
+        "vote_order", "vote_order__candidate", "ticket_order", "ticket_order__ticket_type"
+    )
     serializer_class = PaymentSerializer
     permission_classes = [RBACPermission]
     permission_map = {"list": "payments.view", "retrieve": "payments.view", "refund": "payments.refund"}

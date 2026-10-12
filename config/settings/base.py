@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "apps.partners",
     "apps.voting",
     "apps.payments",
+    "apps.ticketing",
     "apps.finance",
     "apps.publicapi",
 ]
@@ -203,6 +204,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "votes", "description": "Grand livre des votes, ajustements manuels, statistiques."},
         {"name": "rankings", "description": "Classement (agrégation du grand livre des votes)."},
         {"name": "payments", "description": "Paiements et webhook HR-Skills Pay."},
+        {"name": "ticketing", "description": "Tarifs, commandes, billets et statistiques de billetterie."},
         {"name": "finance", "description": "Vue d'ensemble, compte marchand, rapprochement, rapports."},
         {"name": "settings", "description": "Paramètres généraux du site (singleton)."},
         {"name": "public", "description": "API publique sans authentification, consommée par le site public."},
@@ -236,7 +238,7 @@ LOGIN_MAX_FAILED_ATTEMPTS = env_int("LOGIN_MAX_FAILED_ATTEMPTS", 5)
 LOGIN_LOCKOUT_MINUTES = env_int("LOGIN_LOCKOUT_MINUTES", 15)
 
 # --------------------------------------------------------------------------
-# HR-Skills Pay (Mobile Money uniquement — pas de carte bancaire, décision A)
+# HR-Skills Pay (Mobile Money pour la billetterie, carte optionnelle pour le vote)
 # --------------------------------------------------------------------------
 HRSKILLS_ENVIRONMENT = env("HRSKILLS_ENVIRONMENT", "test")
 HRSKILLS_PUBLIC_KEY = env("HRSKILLS_PUBLIC_KEY", "")
@@ -247,6 +249,8 @@ HRSKILLS_BASE_URL = env("HRSKILLS_BASE_URL", "https://api.hrskills-pay.com")
 HRSKILLS_USE_SANDBOX_PREFIX = env_bool("HRSKILLS_USE_SANDBOX_PREFIX", True)
 # Garde-fou volontaire : un simple HRSKILLS_ENVIRONMENT=live ne suffit pas à activer les paiements réels.
 HRSKILLS_ALLOW_LIVE = env_bool("HRSKILLS_ALLOW_LIVE", False)
+HRSKILLS_CARD_ENABLED = env_bool("HRSKILLS_CARD_ENABLED", False)
+HRSKILLS_CARD_RETURN_URL = env("HRSKILLS_CARD_RETURN_URL", "")
 # Une commande dont le paiement reste PENDING au-delà de ce délai est considérée expirée
 # (filet de sécurité Celery Beat si le webhook n'arrive jamais).
 HRSKILLS_PENDING_TIMEOUT_MINUTES = env_int("HRSKILLS_PENDING_TIMEOUT_MINUTES", 15)

@@ -26,7 +26,10 @@ class PublicCompetitionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Competition
-        fields = ["id", "name", "slug", "description", "start_date", "end_date", "status", "votes_open", "phases", "current_phase"]
+        fields = [
+            "id", "name", "slug", "description", "start_date", "end_date",
+            "status", "votes_open", "ticket_sales_open", "phases", "current_phase",
+        ]
 
     def get_current_phase(self, obj) -> dict | None:
         phase = next((p for p in obj.phases.all() if p.status == Phase.ACTIVE), None)

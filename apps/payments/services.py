@@ -1,19 +1,21 @@
 import hashlib
 import json
 import logging
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from django.db import transaction
 from django.core.cache import cache
+from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.constants import AuditAction as A
 from apps.audit.constants import AuditModule as M
 from apps.audit.services import record
 from apps.core.exceptions import ConflictError, DomainError, ServiceUnavailableError
+from apps.ticketing.models import TicketOrder
 from apps.voting.models import VoteOrder
 from apps.voting.services import credit_paid_order
 
-from .gateway import PaymentGatewayError, build_client_from_settings, verify_webhook_signature
+from .gateway import PaymentGatewayError, build_client_from_settings, card_payments_enabled, verify_webhook_signature
 from .models import Payment, PaymentEvent
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,16 @@ def _order_status_for(payment_status):
     }.get(payment_status)
 
 
+def _ticket_status_for(payment_status):
+    return {
+        Payment.SUCCESS: TicketOrder.PAID,
+        Payment.FAILED: TicketOrder.FAILED,
+        Payment.CANCELLED: TicketOrder.CANCELLED,
+        Payment.EXPIRED: TicketOrder.EXPIRED,
+        Payment.REFUNDED: TicketOrder.REFUNDED,
+    }.get(payment_status)
+
+
 # ---------------------------------------------------------------------------
 # Initiation (création de la ligne PENDING en base, puis appel réseau HORS transaction)
 # ---------------------------------------------------------------------------
@@ -53,19 +65,51 @@ def initiate_payment(order, *, request=None):
     """
     from django.conf import settings
 
+    is_ticket_order = isinstance(order, TicketOrder)
+    is_card = order.operator == "CARD"
+    if is_card and not card_payments_enabled():
+        raise ServiceUnavailableError("Le paiement par carte est désactivé.", code="CARD_PAYMENTS_DISABLED")
+
     payment = Payment.objects.create(
-        vote_order=order, reference=order.order_number, environment=settings.HRSKILLS_ENVIRONMENT,
+        vote_order=None if is_ticket_order else order,
+        ticket_order=order if is_ticket_order else None,
+        reference=order.order_number, environment=settings.HRSKILLS_ENVIRONMENT,
         amount_xaf=order.amount_xaf, phone=order.customer_phone, operator=order.operator,
     )
+    description = (
+        f"African Talents — billet {order.ticket_type.label}"
+        if is_ticket_order
+        else f"African Talents — {order.quantity} votes"
+    )
+    metadata = {"order_number": order.order_number}
+    if is_ticket_order:
+        metadata.update({"ticket_class": order.ticket_type.ticket_class})
+        if order.promo_candidate_id:
+            metadata["candidate_code"] = order.promo_candidate.code
+    else:
+        metadata["candidate_code"] = order.candidate.code
 
     try:
         client = build_client_from_settings()
-        result = client.create_mobile_money_payin(
-            reference=order.order_number, amount_xaf=order.amount_xaf, phone_number=order.customer_phone,
-            operator=order.operator, description=f"African Talents — {order.quantity} votes",
-            metadata={"order_number": order.order_number, "candidate_code": order.candidate.code},
-            idempotency_key=order.idempotency_key,
-        )
+        if is_card:
+            return_url = _card_return_url(settings.HRSKILLS_CARD_RETURN_URL, order.order_number)
+            cancel_url = _card_return_url(settings.HRSKILLS_CARD_RETURN_URL, order.order_number, cancelled=True)
+            result = client.create_card_payment(
+                amount_xaf=order.amount_xaf,
+                description=description,
+                customer={"phone": order.customer_phone} if order.customer_phone else {},
+                currency="XAF",
+                return_url=return_url,
+                cancel_url=cancel_url,
+                lang="fr",
+                idempotency_key=order.idempotency_key,
+            )
+        else:
+            result = client.create_mobile_money_payin(
+                reference=order.order_number, amount_xaf=order.amount_xaf, phone_number=order.customer_phone,
+                operator=order.operator, description=description, metadata=metadata,
+                idempotency_key=order.idempotency_key,
+            )
     except PaymentGatewayError as exc:
         _mark_initiation_failed(payment, order, str(exc), request=request)
         raise ServiceUnavailableError(
@@ -79,14 +123,36 @@ def initiate_payment(order, *, request=None):
 
     with transaction.atomic():
         payment.provider_reference = result.get("provider_reference") or ""
+        if is_card:
+            payment.provider = "hrskills_pay_card"
+            payment.checkout_url = result.get("checkout_url") or ""
         gateway_status = (result.get("status") or "").upper()
+        if is_card:
+            gateway_status = _normalize_card_status(gateway_status)
         if gateway_status in (Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED):
             apply_status(payment, gateway_status, reason="Statut terminal immédiat du prestataire.", request=request)
-        payment.save(update_fields=["provider_reference", "updated_at"])
+        payment.save(update_fields=["provider", "provider_reference", "checkout_url", "updated_at"])
         record(request=request, action=A.PAYMENT_INITIATED, module=M.FINANCE, resource="payment",
                resource_id=payment.pk, metadata={"reference": payment.reference, "provider_reference": payment.provider_reference})
 
     return payment
+
+
+def _card_return_url(base_url, order_number, *, cancelled=False):
+    parts = urlsplit(base_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["order_number"] = order_number
+    if cancelled:
+        query["cancelled"] = "1"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _normalize_card_status(status):
+    return {
+        "CAPTURED": Payment.SUCCESS,
+        "SETTLED": Payment.SUCCESS,
+        "CANCELED": Payment.CANCELLED,
+    }.get(status, status)
 
 
 def _mark_initiation_failed(payment, order, reason, *, request=None):
@@ -95,7 +161,7 @@ def _mark_initiation_failed(payment, order, reason, *, request=None):
         payment.failure_reason = reason[:255]
         payment.confirmed_at = timezone.now()
         payment.save(update_fields=["status", "failure_reason", "confirmed_at", "updated_at"])
-        order.status = VoteOrder.FAILED
+        order.status = order.FAILED
         order.save(update_fields=["status", "updated_at"])
         record(request=request, action=A.PAYMENT_INITIATION_FAILED, module=M.FINANCE, resource="payment",
                resource_id=payment.pk, metadata={"reference": payment.reference, "reason": reason})
@@ -128,11 +194,15 @@ def apply_status(payment, new_status, *, reason="", fees_xaf=None, net_amount_xa
     payment.save()
 
     order_status = _order_status_for(new_status)
-    if order_status:
+    if order_status and payment.vote_order_id:
         payment.vote_order.status = order_status
         payment.vote_order.save(update_fields=["status", "updated_at"])
+    ticket_status = _ticket_status_for(new_status)
+    if ticket_status and payment.ticket_order_id:
+        payment.ticket_order.status = ticket_status
+        payment.ticket_order.save(update_fields=["status", "updated_at"])
 
-    if new_status == Payment.SUCCESS:
+    if new_status == Payment.SUCCESS and payment.vote_order_id:
         credit_paid_order(payment.vote_order)
 
     record(request=request, action=A.PAYMENT_STATUS_CHANGED, module=M.FINANCE, resource="payment",
@@ -148,12 +218,17 @@ def refresh_pending_payment(payment, *, request=None):
         return payment
 
     try:
-        verified = build_client_from_settings().get_payment_status(payment.reference)
+        client = build_client_from_settings()
+        if payment.provider == "hrskills_pay_card":
+            verified = client.get_card_payment_status(payment.provider_reference)
+            status = _normalize_card_status((verified.get("status") or "").upper())
+        else:
+            verified = client.get_payment_status(payment.reference)
+            status = (verified.get("status") or "").upper()
     except PaymentGatewayError as exc:
         logger.warning("Impossible de synchroniser le paiement %s auprès de HR-Skills Pay : %s", payment.reference, exc)
         return payment
 
-    status = (verified.get("status") or "").upper()
     if status not in (Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED):
         return payment
 
@@ -162,6 +237,13 @@ def refresh_pending_payment(payment, *, request=None):
         logger.error(
             "Écart de montant pendant la synchronisation de %s : attendu %s, reçu %s — paiement non crédité.",
             payment.reference, payment.amount_xaf, amount_xaf,
+        )
+        return payment
+    verified_currency = verified.get("currency")
+    if verified_currency and verified_currency.upper() != payment.currency:
+        logger.error(
+            "Écart de devise pendant la synchronisation de %s : attendu %s, reçu %s — paiement non crédité.",
+            payment.reference, payment.currency, verified_currency,
         )
         return payment
 
@@ -192,9 +274,10 @@ def handle_webhook(raw_body: bytes, signature_header: str, *, request=None):
     except (ValueError, UnicodeDecodeError):
         payload = {}
 
-    event_id = payload.get("event_id") or f"sha256:{hashlib.sha256(raw_body).hexdigest()}"
-    reference = payload.get("reference", "")
-    event_type = payload.get("event_type") or payload.get("type", "")
+    event_data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    event_id = payload.get("event_id") or event_data.get("event_id") or f"sha256:{hashlib.sha256(raw_body).hexdigest()}"
+    reference = payload.get("reference") or event_data.get("reference", "")
+    event_type = payload.get("event_type") or payload.get("type") or event_data.get("event_type", "")
 
     if not signature_valid:
         PaymentEvent.objects.get_or_create(
@@ -228,8 +311,19 @@ def handle_webhook(raw_body: bytes, signature_header: str, *, request=None):
 
 
 def _process_event(event, payload):
-    reference = payload.get("reference", "")
-    payment = Payment.objects.select_related("vote_order", "vote_order__candidate").filter(reference=reference).first()
+    event_data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    reference = payload.get("reference") or event_data.get("reference", "")
+    payment = (
+        Payment.objects.select_related("vote_order", "vote_order__candidate", "ticket_order", "ticket_order__promo_candidate")
+        .filter(reference=reference)
+        .first()
+    )
+    if payment is None:
+        payment = (
+            Payment.objects.select_related("vote_order", "vote_order__candidate", "ticket_order", "ticket_order__promo_candidate")
+            .filter(provider_reference=reference, provider="hrskills_pay_card")
+            .first()
+        )
     if payment is None:
         logger.warning("Webhook reçu pour une référence inconnue : %s", reference)
         return
@@ -243,17 +337,28 @@ def _process_event(event, payload):
     # on revérifie le statut auprès de l'API de statut avant d'appliquer quoi que ce soit.
     try:
         client = build_client_from_settings()
-        verified = client.get_payment_status(reference)
+        if payment.provider == "hrskills_pay_card":
+            verified = client.get_card_payment_status(payment.provider_reference)
+            verified_status = _normalize_card_status((verified.get("status") or "").upper())
+        else:
+            verified = client.get_payment_status(reference)
+            verified_status = (verified.get("status") or "").upper()
     except PaymentGatewayError as exc:
         logger.error("Impossible de revérifier le paiement %s auprès de HR-Skills Pay : %s", reference, exc)
         return
 
-    verified_status = (verified.get("status") or "").upper()
     verified_amount = verified.get("amount_xaf")
     if verified_amount is not None and int(verified_amount) != payment.amount_xaf:
         logger.error(
             "Écart de montant sur %s : attendu %s, reçu %s — paiement NON crédité.",
             reference, payment.amount_xaf, verified_amount,
+        )
+        return
+    verified_currency = verified.get("currency")
+    if verified_currency and verified_currency.upper() != payment.currency:
+        logger.error(
+            "Écart de devise sur %s : attendu %s, reçu %s — paiement NON crédité.",
+            reference, payment.currency, verified_currency,
         )
         return
     if verified_status not in dict(Payment.STATUS_CHOICES):
@@ -263,7 +368,7 @@ def _process_event(event, payload):
     apply_status(
         payment, verified_status,
         fees_xaf=verified.get("fees_xaf"), net_amount_xaf=verified.get("net_amount_xaf"),
-        reason=f"webhook:{event.event_type}",
+        reason=f"webhook:{event.event_type or event_data.get('event_type', '')}",
     )
 
 
@@ -276,7 +381,9 @@ def expire_stale_pending_payments():
     from django.conf import settings
 
     cutoff = timezone.now() - timezone.timedelta(minutes=settings.HRSKILLS_PENDING_TIMEOUT_MINUTES)
-    stale = Payment.objects.filter(status=Payment.PENDING, initiated_at__lt=cutoff).select_related("vote_order")
+    stale = Payment.objects.filter(status=Payment.PENDING, initiated_at__lt=cutoff).select_related(
+        "vote_order", "ticket_order"
+    )
     count = 0
     for payment in stale:
         apply_status(payment, Payment.EXPIRED, reason="Délai d'attente dépassé (webhook jamais reçu).")

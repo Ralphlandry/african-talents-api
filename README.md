@@ -18,7 +18,7 @@ make up            # construit les images, démarre db + redis + backend + worke
 # dans un autre terminal, une fois "backend" démarré :
 make migrations     # génère les fichiers de migration (à committer ensuite dans le dépôt Git)
 make migrate         # applique les migrations (crée aussi le catalogue de permissions + rôle Super Admin)
-make seed            # crée les rôles prédéfinis (Contenu, Candidats, Catégories, Équipe, Financier)
+make seed            # crée les rôles prédéfinis (Contenu, Candidats, Compétition, Catégories, Équipe, Financier)
 make superuser        # crée votre premier compte Super Admin (email + mot de passe demandés)
 ```
 
@@ -83,6 +83,43 @@ La suite couvre :
 chaque groupe de routes avec une description, et les paramètres de requête des endpoints de
 filtrage/statistiques (rapports financiers, séries de votes, classement...) sont documentés
 avec leurs valeurs possibles — pas seulement les corps de requête des créations/modifications.
+
+### Paiement international par carte
+
+Le parcours de vote peut proposer Visa/Mastercard via la page hébergée E-NKAP de HR-Skills Pay.
+Les données de carte restent chez le prestataire ; les votes sont crédités uniquement après
+confirmation serveur (webhook signé et statut relu chez le prestataire). En test, configurez
+`HRSKILLS_CARD_ENABLED=True`, les clés `HRSKILLS_*` de test et
+`HRSKILLS_CARD_RETURN_URL=https://votre-site.example/paiement/retour`. Cette URL est complétée
+automatiquement par la référence de commande. La route de retour ne fait qu'interroger l'API :
+elle ne considère jamais le simple retour navigateur comme une preuve de paiement.
+
+Avant d'accepter des paiements réels, validez le parcours avec les clés de test puis activez
+`HRSKILLS_ENVIRONMENT=live`, `HRSKILLS_ALLOW_LIVE=True` et `HRSKILLS_CARD_ENABLED=True`.
+En production, l'URL de retour doit être en HTTPS. Le prestataire doit aussi avoir le webhook
+de paiement configuré vers `/api/v1/payments/webhooks/hrskills/`.
+
+## Billetterie en ligne
+
+Après déploiement, appliquez les migrations puis configurez les deux tarifs (`Billet classique`
+et `Billet VIP`) dans **Admin > Billetterie**. La route publique `/billetterie` affiche
+uniquement les tarifs actifs de la compétition en cours lorsque la vente est ouverte. La vente
+est fermée par défaut ; un compte disposant de `tickets.manage` peut l'ouvrir ou la clôturer
+depuis **Admin > Billetterie**. L'API refuse également la création de commandes tant qu'elle est
+fermée. Le minuteur de l'accueil s'affiche pendant l'ouverture et disparaît à la clôture ; il
+compte jusqu'à la date de fin de la compétition configurée dans l'administration. Chaque fiche
+candidat propose aussi un lien `/billetterie?promo=CODE-CANDIDAT` à partager : le code attribue
+la vente au candidat, sans réduction de prix. Les montants sont toujours relus côté serveur.
+
+Les paiements sont initiés par MTN Mobile Money ou Orange Money via HR-Skills Pay. Une commande
+reste en attente tant que le prestataire n'a pas confirmé le paiement ; seul un billet payé
+compte comme point candidat et autorise le téléchargement du PDF. Le webhook reste revérifié
+auprès du prestataire avant de confirmer une commande. Le PDF reprend le style des billets
+physiques, affiche le nom du titulaire, un code unique et son QR code ; le nom et une pièce
+d'identité sont à vérifier à l'entrée. Configurez d'abord les identifiants de test Mobile Money
+et réalisez un achat de test avant toute activation en production. La page et
+le PDF n'inventent pas de date ou de lieu d'événement, ces informations n'ayant pas encore été
+définies.
 
 ## Commandes utiles
 

@@ -2,9 +2,9 @@ import hashlib
 import hmac
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
 from apps.payments.gateway import HRSkillsPayClient, PaymentGatewayError, verify_webhook_signature
-from django.core.exceptions import ImproperlyConfigured
 
 
 class FakeResponse:
@@ -72,10 +72,55 @@ def test_payin_fetches_token_then_calls_endpoint(settings):
     assert token_call["url"].endswith("/sandbox/v1/auth/transaction-token")
     assert token_call["headers"]["Authorization"] == "Bearer hrsk_pk_test_uniq1"
     assert token_call["json"] == {"api_secret": "hrsk_sk_test_uniq1"}
-    assert session.calls[1]["headers"]["Authorization"] == "Bearer hrsk_sk_test_uniq1"
+    assert session.calls[1]["headers"]["Authorization"] == "Bearer hrsk_pk_test_uniq1"
     assert session.calls[1]["headers"]["X-Transaction-Token"] == "tok-123"
     assert session.calls[1]["headers"]["Idempotency-Key"] == "AT-2026-000001"
     assert "/sandbox" in session.calls[1]["url"]  # préfixe sandbox appliqué en environnement "test"
+
+
+@pytest.mark.django_db
+def test_card_payin_uses_hosted_checkout_and_card_status_endpoint(settings):
+    session = ScriptedSession([
+        FakeResponse(200, {"token": "tok-card", "expires_in": 2700}),
+        FakeResponse(201, {"success": True, "data": {
+            "reference": "card_ref_1", "status": "PENDING", "checkout_url": "https://pay.enkap.cm/checkout/1",
+        }}),
+        FakeResponse(200, {"success": True, "data": {
+            "reference": "card_ref_1", "status": "CAPTURED", "amount": 1000, "currency": "XAF",
+        }}),
+    ])
+    client = make_client(session, public_suffix="card1")
+
+    created = client.create_card_payment(
+        amount_xaf=1000, description="Vote AT-1", customer={"phone": "+237655500001"},
+        idempotency_key="card-idempotency-key",
+    )
+    status = client.get_card_payment_status(created["provider_reference"])
+
+    assert created["status"] == "PENDING"
+    assert created["checkout_url"] == "https://pay.enkap.cm/checkout/1"
+    assert status["status"] == "CAPTURED"
+    assert status["amount_xaf"] == 1000
+    assert session.calls[1]["url"].endswith("/sandbox/api/v1/payments/card")
+    assert session.calls[1]["headers"]["Authorization"] == "Bearer hrsk_pk_test_card1"
+    assert session.calls[1]["json"]["currency"] == "XAF"
+    assert session.calls[2]["url"].endswith("/sandbox/api/v1/payments/card/card_ref_1")
+
+
+@pytest.mark.django_db
+def test_card_checkout_rejects_non_https_redirect(settings):
+    session = ScriptedSession([
+        FakeResponse(200, {"token": "tok-card", "expires_in": 2700}),
+        FakeResponse(201, {"success": True, "data": {
+            "reference": "card_ref_1", "status": "PENDING", "checkout_url": "javascript:alert(1)",
+        }}),
+    ])
+    client = make_client(session, public_suffix="card-unsafe")
+
+    with pytest.raises(PaymentGatewayError) as exc_info:
+        client.create_card_payment(amount_xaf=1000, idempotency_key="unsafe-url")
+
+    assert exc_info.value.code == "INVALID_CHECKOUT_URL"
 
 
 @pytest.mark.django_db
@@ -91,6 +136,31 @@ def test_token_is_cached_across_calls(settings):
     # 1 appel de jeton + 2 appels métier = 3 requêtes au total (pas de second appel de jeton)
     assert len(session.calls) == 3
     assert sum(1 for c in session.calls if "transaction-token" in c["url"]) == 1
+
+
+@pytest.mark.django_db
+def test_rotating_secret_key_requests_a_new_transaction_token(settings):
+    session = ScriptedSession([
+        FakeResponse(200, {"token": "tok-before-rotation", "expires_in": 2700}),
+        FakeResponse(200, {"token": "tok-after-rotation", "expires_in": 2700}),
+    ])
+    public_key = "hrsk_pk_test_rotation-unique"
+    first_client = HRSkillsPayClient(
+        public_key=public_key,
+        secret_key="hrsk_sk_test_old-secret",
+        environment="test",
+        session=session,
+    )
+    rotated_client = HRSkillsPayClient(
+        public_key=public_key,
+        secret_key="hrsk_sk_test_new-secret",
+        environment="test",
+        session=session,
+    )
+
+    assert first_client._get_transaction_token() == "tok-before-rotation"
+    assert rotated_client._get_transaction_token() == "tok-after-rotation"
+    assert len(session.calls) == 2
 
 
 @pytest.mark.django_db

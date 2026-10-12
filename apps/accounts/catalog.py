@@ -66,6 +66,10 @@ PERMISSION_GROUPS = [
         ("reconciliation.view", "Voir le rapprochement financier"),
         ("reconciliation.run", "Lancer un rapprochement financier"),
     ]},
+    {"key": "ticketing", "label": "Billetterie", "permissions": [
+        ("tickets.manage", "Gérer les tarifs des billets"),
+        ("tickets.statistics", "Voir les ventes et points de billetterie"),
+    ]},
     {"key": "media", "label": "Médiathèque", "permissions": [
         ("media.view", "Voir la médiathèque"),
         ("media.upload", "Ajouter un média"),
@@ -107,6 +111,17 @@ PRESET_ROLES = [
         "permissions": ["candidates.view", "candidates.create", "candidates.edit", "candidates.publish", "categories.view", "media.view", "media.upload"],
     },
     {
+        "slug": "competition_admin", "name": "Administrateur Compétition", "color": "blue",
+        "description": "Gère la compétition, les candidats, les votes et les tarifs de billetterie.",
+        "permissions": [
+            "competition.view", "competition.edit", "competition.start", "competition.stop",
+            "candidates.view", "candidates.create", "candidates.edit", "candidates.publish",
+            "categories.view", "categories.create", "categories.edit", "categories.delete",
+            "votes.view", "votes.statistics", "rankings.view",
+            "tickets.manage", "tickets.statistics",
+        ],
+    },
+    {
         "slug": "categories_admin", "name": "Administrateur Catégories", "color": "blue",
         "description": "Gère les catégories de la compétition.",
         "permissions": ["categories.view", "categories.create", "categories.edit", "categories.delete", "categories.publish"],
@@ -122,6 +137,7 @@ PRESET_ROLES = [
         "permissions": [
             "payments.view", "payments.statistics", "payments.export", "merchant.view",
             "reconciliation.view", "votes.view", "votes.statistics", "rankings.view",
+            "tickets.statistics",
         ],
     },
 ]

@@ -17,7 +17,8 @@ urlpatterns = [
     # --- jalon 3 : forfaits de vote, votes, paiements, finance (espace administrateur) ---
     path("", include("apps.voting.urls")),
     path("", include("apps.payments.urls")),
+    path("", include("apps.ticketing.urls")),
     path("", include("apps.finance.urls")),
-    # --- API publique, en lecture seule sauf création de commande de vote, sans authentification admin ---
+    # --- API publique, en lecture seule sauf création de commandes, sans authentification admin ---
     path("public/", include("apps.publicapi.urls")),
 ]

@@ -22,6 +22,7 @@ class Competition(BaseModel):
     end_date = models.DateField()
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=DRAFT, db_index=True)
     votes_open = models.BooleanField(default=False)
+    ticket_sales_open = models.BooleanField(default=False)
     # Une seule compétition peut être "active" à la fois (contrainte applicative, cf. services.py).
     is_current = models.BooleanField(default=False, db_index=True)
 

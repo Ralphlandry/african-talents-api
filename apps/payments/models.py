@@ -5,7 +5,7 @@ from apps.core.models import BaseModel
 
 class Payment(BaseModel):
     """
-    Reflète l'état du paiement HR-Skills Pay pour une VoteOrder. Machine à états monotone :
+    Reflète l'état du paiement HR-Skills Pay pour une commande de vote ou de billet. Machine à états monotone :
     un état terminal (SUCCESS, FAILED, CANCELLED, EXPIRED, REFUNDED) ne redevient jamais
     PENDING — cf. apps/payments/services.py::apply_status pour les transitions autorisées.
     """
@@ -23,14 +23,20 @@ class Payment(BaseModel):
     ]
     TERMINAL_STATUSES = {SUCCESS, FAILED, CANCELLED, EXPIRED, REFUNDED}
 
-    vote_order = models.OneToOneField("voting.VoteOrder", on_delete=models.PROTECT, related_name="payment")
-    reference = models.CharField(max_length=32, unique=True)  # = vote_order.order_number
+    vote_order = models.OneToOneField(
+        "voting.VoteOrder", on_delete=models.PROTECT, null=True, blank=True, related_name="payment"
+    )
+    ticket_order = models.OneToOneField(
+        "ticketing.TicketOrder", on_delete=models.PROTECT, null=True, blank=True, related_name="payment"
+    )
+    reference = models.CharField(max_length=32, unique=True)  # = order_number
     provider = models.CharField(max_length=32, default="hrskills_pay")
     provider_reference = models.CharField(max_length=100, blank=True)
+    checkout_url = models.URLField(max_length=1000, blank=True)
     environment = models.CharField(max_length=8)  # "test" | "live"
     amount_xaf = models.PositiveIntegerField()
     currency = models.CharField(max_length=3, default="XAF")
-    phone = models.CharField(max_length=32)
+    phone = models.CharField(max_length=32, blank=True)
     operator = models.CharField(max_length=32)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=PENDING, db_index=True)
     fees_xaf = models.PositiveIntegerField(null=True, blank=True)
@@ -42,6 +48,15 @@ class Payment(BaseModel):
     class Meta:
         ordering = ["-initiated_at"]
         indexes = [models.Index(fields=["status", "-initiated_at"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(vote_order__isnull=False, ticket_order__isnull=True)
+                    | models.Q(vote_order__isnull=True, ticket_order__isnull=False)
+                ),
+                name="payment_has_exactly_one_order",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.reference} — {self.status}"

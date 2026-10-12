@@ -14,6 +14,7 @@ urlpatterns = [
     path("site/", views.PublicSiteSettingsView.as_view(), name="public-site-settings"),
     path("rankings/", views.PublicRankingView.as_view(), name="public-rankings"),
     path("vote-packages/", views.PublicVotePackageListView.as_view(), name="public-vote-packages"),
+    path("payment-methods/", views.PublicPaymentMethodsView.as_view(), name="public-payment-methods"),
     path("vote-orders/", views.PublicVoteOrderCreateView.as_view(), name="public-vote-order-create"),
     path("vote-orders/<str:order_number>/", views.PublicVoteOrderStatusView.as_view(), name="public-vote-order-status"),
 ]

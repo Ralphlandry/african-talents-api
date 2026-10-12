@@ -16,6 +16,7 @@ class AuditModule:
     PARTNERS = "partners"
     COMPETITION = "competition"
     VOTES = "votes"
+    TICKETING = "ticketing"
     FINANCE = "finance"
     MEDIA = "media"
     SETTINGS = "settings"
@@ -31,6 +32,7 @@ class AuditModule:
         PARTNERS: "Partenaires",
         COMPETITION: "Compétition",
         VOTES: "Votes",
+        TICKETING: "Billetterie",
         FINANCE: "Finance",
         MEDIA: "Médiathèque",
         SETTINGS: "Paramètres",
@@ -96,6 +98,8 @@ class AuditAction:
     VOTE_PACKAGE_UPDATED = "VOTE_PACKAGE_UPDATED"
     VOTE_PACKAGE_DELETED = "VOTE_PACKAGE_DELETED"
     VOTE_ORDER_CREATED = "VOTE_ORDER_CREATED"
+    TICKET_ORDER_CREATED = "TICKET_ORDER_CREATED"
+    TICKET_SALES_STATUS_CHANGED = "TICKET_SALES_STATUS_CHANGED"
     VOTE_ADJUSTED = "VOTE_ADJUSTED"
 
     PAYMENT_INITIATED = "PAYMENT_INITIATED"

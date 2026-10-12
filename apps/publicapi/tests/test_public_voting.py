@@ -4,15 +4,26 @@ PUBLIC = "/api/v1/public"
 
 
 class FakeGatewayClient:
-    def __init__(self, payin_result=None, status_result=None):
+    def __init__(self, payin_result=None, status_result=None, card_result=None, card_status_result=None):
         self.payin_result = payin_result or {"status": "PENDING", "provider_reference": "HRS-1", "fees_xaf": None, "net_amount_xaf": None}
         self.status_result = status_result or {"status": "PENDING"}
+        self.card_result = card_result or {
+            "status": "PENDING", "provider_reference": "CARD-1",
+            "checkout_url": "https://pay.enkap.cm/checkout/CARD-1",
+        }
+        self.card_status_result = card_status_result or {"status": "PENDING"}
 
     def create_mobile_money_payin(self, **kwargs):
         return self.payin_result
 
     def get_payment_status(self, reference):
         return self.status_result
+
+    def create_card_payment(self, **kwargs):
+        return self.card_result
+
+    def get_card_payment_status(self, reference):
+        return self.card_status_result
 
 
 @pytest.mark.django_db
@@ -50,6 +61,72 @@ def test_full_public_vote_flow(monkeypatch, api, make_competition, make_category
 
     polled = api.get(f"{PUBLIC}/vote-orders/{order_number}/")
     assert polled.status_code == 200 and polled.json()["order_number"] == order_number
+
+
+@pytest.mark.django_db
+def test_card_vote_flow_returns_checkout_and_confirms_only_after_capture(
+    monkeypatch, api, settings, make_competition, make_category, make_candidate, make_vote_package
+):
+    from apps.payments import services as payment_services
+    from apps.voting.models import Vote
+
+    settings.HRSKILLS_CARD_ENABLED = True
+    settings.HRSKILLS_CARD_RETURN_URL = "https://talents.example/paiement/retour"
+    settings.HRSKILLS_PUBLIC_KEY = "hrsk_pk_test_card"
+    settings.HRSKILLS_SECRET_KEY = "hrsk_sk_test_card"
+    fake = FakeGatewayClient(card_status_result={
+        "status": "SETTLED", "amount_xaf": 1000, "currency": "XAF",
+    })
+    monkeypatch.setattr(payment_services, "build_client_from_settings", lambda: fake)
+    methods = api.get(f"{PUBLIC}/payment-methods/")
+    assert "CARD" in [method["id"] for method in methods.json()["methods"]]
+
+    competition = make_competition(votes_open=True)
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    package = make_vote_package(competition, quantity=10, price_xaf=1000)
+    created = api.post(f"{PUBLIC}/vote-orders/", {
+        "candidate": candidate.slug,
+        "vote_package": str(package.pk),
+        "operator": "CARD",
+        "idempotency_key": "public-card-flow",
+        "accept_terms": True,
+    }, format="json")
+
+    assert created.status_code == 201
+    order = created.json()
+    assert order["checkout_url"] == "https://pay.enkap.cm/checkout/CARD-1"
+    assert order["status"] == "PENDING"
+    assert Vote.objects.filter(vote_order__order_number=order["order_number"]).count() == 0
+
+    polled = api.get(f"{PUBLIC}/vote-orders/{order['order_number']}/")
+
+    assert polled.json()["status"] == "PAID"
+    assert Vote.objects.get(vote_order__order_number=order["order_number"]).quantity == 10
+
+
+@pytest.mark.django_db
+def test_card_payment_method_is_hidden_and_rejected_when_disabled(api, settings, make_competition, make_category, make_candidate, make_vote_package):
+    from apps.voting.models import VoteOrder
+
+    settings.HRSKILLS_CARD_ENABLED = False
+    methods = api.get(f"{PUBLIC}/payment-methods/")
+    assert "CARD" not in [method["id"] for method in methods.json()["methods"]]
+
+    competition = make_competition(votes_open=True)
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    package = make_vote_package(competition)
+    response = api.post(f"{PUBLIC}/vote-orders/", {
+        "candidate": candidate.slug,
+        "vote_package": str(package.pk),
+        "operator": "CARD",
+        "idempotency_key": "disabled-card-method",
+        "accept_terms": True,
+    }, format="json")
+
+    assert response.status_code == 503
+    assert not VoteOrder.objects.filter(idempotency_key="disabled-card-method").exists()
 
 
 @pytest.mark.django_db

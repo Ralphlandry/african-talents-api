@@ -1,22 +1,8 @@
-"""
-Client HTTP pour HR-Skills Pay.
-
-IMPORTANT — limite honnête de cette implémentation :
-Je n'ai pas eu accès à la documentation officielle interactive (hrskills-pay.com/docs) ni
-à un accès réseau pour installer et inspecter le SDK Python officiel `hrpay`. Ce client est
-donc écrit contre le CONTRAT HTTP tel que documenté dans les README publics des SDK
-officiels (Python/Go/PHP) — endpoints, en-têtes, formats de réponse — et non contre une API
-Python de SDK que je ne peux pas vérifier. Les noms de champs de réponse (`status`,
-`provider_reference`, `fees`...) sont donc une reconstruction prudente : `_extract` lit
-plusieurs noms plausibles pour chaque champ afin de limiter la casse si HR-Skills Pay utilise
-une convention légèrement différente, mais un test réel en sandbox (clés `hrsk_*_test_...`)
-reste nécessaire avant toute mise en production — voir le rapport d'architecture, §12, pour
-le détail des contradictions relevées entre les sources.
-"""
+"""Client HTTP pour l'API HR-Skills Pay (Mobile Money et checkout carte hébergé E-NKAP)."""
 import hashlib
 import hmac
 import logging
-import time
+from urllib.parse import urlsplit
 
 import requests
 from django.conf import settings
@@ -30,6 +16,11 @@ TOKEN_CACHE_KEY = "hrskills_pay:transaction_token"
 TOKEN_TTL_SECONDS = 40 * 60  # un peu sous les 45 min documentées, par prudence
 
 
+def _transaction_token_cache_key(environment, public_key, secret_key):
+    credentials_fingerprint = hashlib.sha256(f"{public_key}:{secret_key}".encode()).hexdigest()[:16]
+    return f"{TOKEN_CACHE_KEY}:{environment}:{credentials_fingerprint}"
+
+
 class PaymentGatewayError(Exception):
     """Erreur de communication avec HR-Skills Pay (réseau, réponse invalide, refus de l'API)."""
 
@@ -38,6 +29,26 @@ class PaymentGatewayError(Exception):
         self.code = code
         self.status_code = status_code
         self.payload = payload
+
+
+def card_payments_enabled():
+    environment = getattr(settings, "HRSKILLS_ENVIRONMENT", "")
+    public_key = getattr(settings, "HRSKILLS_PUBLIC_KEY", "")
+    secret_key = getattr(settings, "HRSKILLS_SECRET_KEY", "")
+    return_url = urlsplit(getattr(settings, "HRSKILLS_CARD_RETURN_URL", ""))
+    enabled = bool(
+        environment in ("test", "live")
+        and getattr(settings, "HRSKILLS_CARD_ENABLED", False)
+        and return_url.scheme in ("https", "http")
+        and return_url.netloc
+        and public_key.startswith(f"hrsk_pk_{environment}_")
+        and secret_key.startswith(f"hrsk_sk_{environment}_")
+    )
+    return enabled and (
+        environment != "live"
+        or getattr(settings, "HRSKILLS_ALLOW_LIVE", False)
+        and return_url.scheme == "https"
+    )
 
 
 def _extract(data, *names, default=None):
@@ -87,7 +98,7 @@ class HRSkillsPayClient:
 
     # -- authentification (double clé -> transaction token, mis en cache) -------------
     def _get_transaction_token(self):
-        cache_key = f"{TOKEN_CACHE_KEY}:{self.environment}:{self.public_key[-8:]}"
+        cache_key = _transaction_token_cache_key(self.environment, self.public_key, self.secret_key)
         cached = cache.get(cache_key)
         if cached:
             return cached
@@ -113,7 +124,7 @@ class HRSkillsPayClient:
         url = f"{self.base_url}{self._path(path)}"
         final_headers = {"Content-Type": "application/json", **(headers or {})}
         if authenticated:
-            final_headers["Authorization"] = f"Bearer {self.secret_key}"
+            final_headers["Authorization"] = f"Bearer {self.public_key}"
             final_headers["X-Transaction-Token"] = self._get_transaction_token()
 
         try:
@@ -130,7 +141,7 @@ class HRSkillsPayClient:
 
         if response.status_code == 401 and authenticated:
             # Jeton peut-être expiré entre le cache et l'appel : une seule tentative de rafraîchissement.
-            cache.delete(f"{TOKEN_CACHE_KEY}:{self.environment}:{self.public_key[-8:]}")
+            cache.delete(_transaction_token_cache_key(self.environment, self.public_key, self.secret_key))
             final_headers["X-Transaction-Token"] = self._get_transaction_token()
             response = self.session.request(method, url, json=json, params=params, headers=final_headers, timeout=DEFAULT_TIMEOUT)
             try:
@@ -160,6 +171,52 @@ class HRSkillsPayClient:
             "status": _extract(body, "status", "state", default="PENDING"),
             "provider_reference": _extract(body, "provider_reference", "id", "transaction_id"),
             "fees_xaf": _extract(body, "fees", "fee_amount"),
+            "net_amount_xaf": _extract(body, "net_amount", "net"),
+            "raw": body,
+        }
+
+    def create_card_payment(self, *, amount_xaf, description="", customer=None, currency="XAF", return_url=None, cancel_url=None, lang="fr", idempotency_key=None):
+        payload = {
+            "amount": amount_xaf,
+            "currency": currency,
+            "description": description,
+            "customer": customer or {},
+            "lang": lang,
+        }
+        if return_url:
+            payload["return_url"] = return_url
+        if cancel_url:
+            payload["cancel_url"] = cancel_url
+        body = self._raw_request(
+            "POST", "/api/v1/payments/card", json=payload,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        checkout_url = _extract(body, "checkout_url")
+        if checkout_url:
+            parsed_url = urlsplit(checkout_url)
+            if parsed_url.scheme != "https" or not parsed_url.netloc:
+                raise PaymentGatewayError(
+                    "URL de paiement carte invalide ou non sécurisée reçue du prestataire.",
+                    code="INVALID_CHECKOUT_URL",
+                )
+        return {
+            "status": _extract(body, "status", "state", default="PENDING"),
+            "provider_reference": _extract(body, "reference", "provider_reference", "transaction_id"),
+            "checkout_url": checkout_url,
+            "fees_xaf": _extract(body, "fees", "fee", "fee_amount"),
+            "net_amount_xaf": _extract(body, "net_amount", "net"),
+            "raw": body,
+        }
+
+    def get_card_payment_status(self, reference):
+        from urllib.parse import quote
+
+        body = self._raw_request("GET", f"/api/v1/payments/card/{quote(reference, safe='')}")
+        return {
+            "status": _extract(body, "status", "state"),
+            "amount_xaf": _extract(body, "amount", "amount_xaf"),
+            "currency": _extract(body, "currency"),
+            "fees_xaf": _extract(body, "fees", "fee", "fee_amount"),
             "net_amount_xaf": _extract(body, "net_amount", "net"),
             "raw": body,
         }
