@@ -165,7 +165,7 @@ def test_ticket_payment_confirmation_assigns_one_point_and_unlocks_pdf(
     assert pdf["Content-Type"] == "application/pdf"
     assert pdf.content.startswith(b"%PDF")
     assert order.ticket_code.encode() in pdf.content
-    assert b"Amina Njoya" in pdf.content
+    assert b"/Subtype /Image" in pdf.content
 
 
 @pytest.mark.django_db
@@ -173,13 +173,22 @@ def test_vip_ticket_pdf_includes_vip_access_benefits(api, monkeypatch, ticket_ty
     from reportlab.pdfgen.canvas import Canvas
 
     rendered_text = []
+    rendered_text_sizes = []
+    current_font = {"size": 0}
     draw_centred_string = Canvas.drawCentredString
+    set_font = Canvas.setFont
 
     def track_drawn_text(pdf, x, y, text):
         rendered_text.append(text)
+        rendered_text_sizes.append((text, current_font["size"]))
         return draw_centred_string(pdf, x, y, text)
 
+    def track_set_font(pdf, name, size):
+        current_font["size"] = size
+        return set_font(pdf, name, size)
+
     monkeypatch.setattr(Canvas, "drawCentredString", track_drawn_text)
+    monkeypatch.setattr(Canvas, "setFont", track_set_font)
     vip_type = TicketType.objects.create(
         competition=ticket_type.competition,
         ticket_class=TicketType.VIP,
@@ -199,10 +208,18 @@ def test_vip_ticket_pdf_includes_vip_access_benefits(api, monkeypatch, ticket_ty
 
     response = api.get(f"{PUBLIC}/ticket-orders/{order.order_number}/pdf/")
     assert response.status_code == 200
-    assert response.status_code == 200
     assert response.content.startswith(b"%PDF")
-    assert "PASS VIP" in rendered_text
-    assert "VIP : PREMIÈRES PLACES · BOISSON · PHOTOS AVEC LA STAR" in rendered_text
+    assert b"/Subtype /Image" in response.content
+    assert "AT-" in order.ticket_code
+    assert order.ticket_code in rendered_text
+    assert "ACCÈS AUX PREMIÈRES PLACES + BOISSON" in rendered_text
+    assert ("ACCÈS AUX PREMIÈRES PLACES + BOISSON", 14) in rendered_text_sizes
+    assert "+ PHOTOS AVEC LES STARS" in rendered_text
+    assert ("+ PHOTOS AVEC LES STARS", 14) in rendered_text_sizes
+    assert "Ce billet n’admet qu’une seule personne." not in rendered_text
+    assert "Ce billet ne peut être remplacé s’il est perdu, volé" not in rendered_text
+    assert "Toutes les ventes de billets sont définitives et" not in rendered_text
+    assert any("15 H" in text for text in rendered_text)
 
 
 @pytest.mark.django_db

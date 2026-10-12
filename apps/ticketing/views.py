@@ -1,5 +1,6 @@
 import math
 from io import BytesIO
+from pathlib import Path
 
 from django.db.models import Count, Q
 from django.http import HttpResponse
@@ -12,6 +13,7 @@ from reportlab.graphics.barcode.qr import QrCodeWidget
 from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 from rest_framework import serializers, viewsets
@@ -88,7 +90,128 @@ def _draw_star(pdf, x, y, radius, color):
     pdf.drawPath(path, fill=1, stroke=0)
 
 
+def _classic_ticket_pdf(order):
+    template_path = Path(__file__).resolve().parent / "assets" / "ticket-classic-template.png"
+    template = ImageReader(str(template_path))
+    image_width, image_height = template.getSize()
+    width = 320 * mm
+    image_display_height = width * image_height / image_width
+    footer_height = 18 * mm
+    height = image_display_height + footer_height
+    scale = width / image_width
+    output = BytesIO()
+    pdf = canvas.Canvas(output, pagesize=(width, height), pageCompression=0)
+    pdf.setTitle(f"Billet African Talents - {order.ticket_code}")
+    pdf.setAuthor("African Talents")
+    pdf.setFillColor(colors.HexColor("#030817"))
+    pdf.rect(0, 0, width, height, fill=1, stroke=0)
+    pdf.drawImage(template, 0, footer_height, width=width, height=image_display_height)
+
+    event_date = order.ticket_type.competition.start_date
+    weekdays = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
+    months = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
+    date_label = f"{weekdays[event_date.weekday()]} {event_date.day} {months[event_date.month - 1]}"
+    event_label = f"{date_label} · 15 H · ARENA Bonamoussadi, Douala"
+
+    pdf.setFillColor(colors.HexColor("#050D2B"))
+    pdf.rect(145 * scale, footer_height + 48 * scale, 720 * scale, 50 * scale, fill=1, stroke=0)
+    pdf.setFillColor(colors.HexColor("#E5B83F"))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawCentredString(505 * scale, footer_height + 66 * scale, event_label)
+
+    pdf.setFillColor(colors.HexColor("#030A20"))
+    pdf.rect(1080 * scale, footer_height, 192 * scale, image_display_height, fill=1, stroke=0)
+    pdf.setStrokeColor(colors.HexColor("#E5B83F"))
+    pdf.setLineWidth(1)
+    pdf.line(1080 * scale, footer_height, 1080 * scale, height)
+    pdf.saveState()
+    pdf.translate(1123 * scale, footer_height + image_display_height / 2)
+    pdf.rotate(90)
+    pdf.setFillColor(colors.HexColor("#FFF9E9"))
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawCentredString(0, 0, "NUMÉRO UNIQUE")
+    pdf.restoreState()
+    pdf.saveState()
+    pdf.translate(1208 * scale, footer_height + image_display_height / 2)
+    pdf.rotate(90)
+    pdf.setFillColor(colors.HexColor("#E5B83F"))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawCentredString(0, 0, order.ticket_code)
+    pdf.restoreState()
+
+    pdf.setStrokeColor(colors.HexColor("#E5B83F"))
+    pdf.setLineWidth(1)
+    pdf.line(0, footer_height, width, footer_height)
+    pdf.setFillColor(colors.HexColor("#E5B83F"))
+    pdf.setFont("Helvetica-Bold", 13)
+    pdf.drawCentredString(width / 2, 6 * mm, "ACCÈS À LA SALLE")
+
+    pdf.showPage()
+    pdf.save()
+    return output.getvalue()
+
+
+def _vip_ticket_pdf(order):
+    template_path = Path(__file__).resolve().parent / "assets" / "ticket-vip-template.png"
+    template = ImageReader(str(template_path))
+    image_width, image_height = template.getSize()
+    width = 320 * mm
+    image_display_height = width * image_height / image_width
+    footer_height = 22 * mm
+    height = image_display_height + footer_height
+    scale = width / image_width
+    output = BytesIO()
+    pdf = canvas.Canvas(output, pagesize=(width, height), pageCompression=0)
+    pdf.setTitle(f"Billet African Talents - {order.ticket_code}")
+    pdf.setAuthor("African Talents")
+    pdf.setFillColor(colors.HexColor("#030817"))
+    pdf.rect(0, 0, width, height, fill=1, stroke=0)
+    pdf.drawImage(template, 0, footer_height, width=width, height=image_display_height)
+
+    event_date = order.ticket_type.competition.start_date
+    weekdays = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
+    months = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
+    date_label = f"{weekdays[event_date.weekday()]} {event_date.day} {months[event_date.month - 1]}"
+    event_label = f"{date_label} · 15 H · À la salle ARENA Bonamoussadi, Douala"
+
+    pdf.setFillColor(colors.HexColor("#050D2B"))
+    pdf.rect(65 * scale, footer_height + 48 * scale, 900 * scale, 50 * scale, fill=1, stroke=0)
+    pdf.setFillColor(colors.HexColor("#FFF9E9"))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawCentredString(515 * scale, footer_height + 66 * scale, event_label)
+
+    pdf.setFillColor(colors.HexColor("#030A20"))
+    pdf.rect(1170 * scale, footer_height, 101 * scale, image_display_height, fill=1, stroke=0)
+    pdf.setStrokeColor(colors.HexColor("#E5B83F"))
+    pdf.setLineWidth(1)
+    pdf.line(1170 * scale, footer_height, 1170 * scale, height)
+    pdf.saveState()
+    pdf.translate(1218 * scale, footer_height + image_display_height / 2)
+    pdf.rotate(90)
+    pdf.setFillColor(colors.HexColor("#E5B83F"))
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawCentredString(0, 0, order.ticket_code)
+    pdf.restoreState()
+
+    pdf.setStrokeColor(colors.HexColor("#E5B83F"))
+    pdf.setLineWidth(1)
+    pdf.line(0, footer_height, width, footer_height)
+    pdf.setFillColor(colors.HexColor("#E5B83F"))
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawCentredString(width / 2, 14 * mm, "ACCÈS AUX PREMIÈRES PLACES + BOISSON")
+    pdf.drawCentredString(width / 2, 7 * mm, "+ PHOTOS AVEC LES STARS")
+
+    pdf.showPage()
+    pdf.save()
+    return output.getvalue()
+
+
 def _ticket_pdf(order):
+    if order.ticket_type.ticket_class == TicketType.CLASSIC:
+        return _classic_ticket_pdf(order)
+    if order.ticket_type.ticket_class == TicketType.VIP:
+        return _vip_ticket_pdf(order)
+
     width, height = 260 * mm, 105 * mm
     gold = colors.HexColor("#E5B83F")
     pale_gold = colors.HexColor("#F8D982")
@@ -235,11 +358,11 @@ def _ticket_pdf(order):
     pdf.drawCentredString(
         terms_center,
         split_y - 11 * mm,
-        f"{event_date} · 16 H · ARENA BONAMOUSSADI, DOUALA",
+        f"{event_date} · 15 H · ARENA BONAMOUSSADI, DOUALA",
     )
     pdf.setFillColor(gold)
     perk = (
-        "VIP : PREMIÈRES PLACES · BOISSON · PHOTOS AVEC LA STAR"
+        "VIP : PREMIÈRES PLACES · BOISSON · PHOTOS AVEC LES STARS"
         if order.ticket_type.ticket_class == TicketType.VIP
         else "PASS CLASSIQUE · ACCÈS À LA FINALE"
     )
