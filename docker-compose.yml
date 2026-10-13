@@ -3,7 +3,7 @@
 name: african-talents
 
 x-backend-env: &backend-env
-  DATABASE_URL: postgres://${POSTGRES_USER:-african_talents}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-african_talents}
+  DATABASE_URL: postgres://${POSTGRES_USER:-african_talents}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-african_talents}
   REDIS_URL: redis://redis:6379/0
   MEDIA_ROOT: /data/media
   STATIC_ROOT: /data/static
@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-african_talents}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-african_talents}
     volumes:
       - pgdata:/var/lib/postgresql/data

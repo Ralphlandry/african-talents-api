@@ -14,7 +14,7 @@ from apps.audit.constants import AuditModule as M
 from apps.audit.services import record
 from apps.core.exceptions import ConflictError, ForbiddenError
 
-from .models import Permission, Role, User
+from .models import Role, User
 
 # ---------------------------------------------------------------------------
 # Utilitaires

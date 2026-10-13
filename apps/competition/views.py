@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from apps.core.permissions import RBACPermission
 
 from . import services
-from .models import Competition, Phase
+from .models import Competition
 from .serializers import CompetitionSerializer, PhaseSerializer
 
 

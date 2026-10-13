@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 from apps.candidates.models import Candidate
 from apps.competition.models import Phase
+
 from .models import Vote, VoteOrder, VotePackage
 
 

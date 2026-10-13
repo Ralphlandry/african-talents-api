@@ -3,7 +3,6 @@ import pytest
 from apps.media.models import MediaAsset
 from apps.partners.models import Partner
 
-
 PARTNERS = "/api/v1/partners/"
 PUBLIC_PARTNERS = "/api/v1/public/partners/"
 

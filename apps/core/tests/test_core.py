@@ -1,6 +1,5 @@
 import pytest
 from django.urls import get_resolver
-from rest_framework.settings import api_settings
 
 from apps.core.permissions import DenyByDefault, RBACPermission
 

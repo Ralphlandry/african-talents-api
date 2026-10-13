@@ -3,7 +3,7 @@ from .catalog import PERMISSION_GROUPS, PRESET_ROLES, SUPER_ADMIN_SLUG
 
 def sync_rbac():
     """Synchronise le catalogue de permissions et garantit l'existence du rôle Super Admin (idempotent)."""
-    from .models import Permission, Role
+    from .models import Permission
 
     for group in PERMISSION_GROUPS:
         for codename, label in group["permissions"]:
