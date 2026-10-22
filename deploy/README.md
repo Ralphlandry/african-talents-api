@@ -7,52 +7,48 @@ puis reconstruit et redémarre le service Docker correspondant.
 
 ## Préparer le VPS une fois
 
-Utiliser un VPS Linux avec Docker Engine, le plugin Docker Compose, `rsync` et Caddy installés.
-Créer un compte de déploiement non-root autorisé à exécuter Docker. Configurer Caddy afin de
-servir les domaines en HTTPS et de transférer les requêtes vers ces ports locaux :
+Le VPS utilise Hestia Control Panel avec Nginx et Apache actifs. Hestia reste responsable des
+ports publics 80/443, des domaines et des certificats Let's Encrypt ; ne pas installer Caddy
+ni exposer directement les ports des conteneurs sur Internet. Configurer le proxy Nginx de
+chaque domaine Hestia vers le service local correspondant :
 
-```caddyfile
-site.example.com {
-    reverse_proxy 127.0.0.1:8080
-}
+| Domaine | Service local |
+|---|---|
+| `african-talents.socoprocaap.com` | `http://127.0.0.1:8080` |
+| `admin-african-talents.socoprocaap.com` | `http://127.0.0.1:8081` |
+| `api-african.socoprocaap.com` | `http://127.0.0.1:8000` |
 
-admin.example.com {
-    reverse_proxy 127.0.0.1:8081
-}
+Les trois enregistrements DNS A doivent pointer vers l'IPv4 du VPS et les certificats HTTPS
+doivent être actifs dans Hestia avant d'activer le proxy des domaines.
 
-api.example.com {
-    reverse_proxy 127.0.0.1:8000
-}
-```
-
-Remplacer les trois noms de domaine par les domaines réels et faire pointer leur DNS vers le
-VPS. Caddy obtient et renouvelle automatiquement les certificats TLS.
-
-Créer les dossiers de déploiement et y déposer les fichiers `.env` **avant le premier push** :
+Créer les dossiers de déploiement dans l'espace Web Hestia et les attribuer au compte
+de déploiement `deploy`, puis y déposer les fichiers `.env` **avant le premier push** :
 
 ```sh
-sudo install -d -o DEPLOY_USER -g DEPLOY_USER \
-  /opt/african-talents/site \
-  /opt/african-talents/admin \
-  /opt/african-talents/api
+sudo install -d -o deploy -g deploy -m 755 \
+  /home/socoprocaap/web/apps/site \
+  /home/socoprocaap/web/apps/admin \
+  /home/socoprocaap/web/apps/api
 ```
 
-Le compte SSH configuré dans GitHub doit pouvoir écrire dans ces trois dossiers et lancer
-`docker compose`. Les fichiers `.env` restent sur le VPS : le workflow les exclut pendant la
-synchronisation et échoue explicitement si l'un manque.
+Utiliser `deploy` comme secret `VPS_USER` dans les trois dépôts GitHub. Ce compte doit pouvoir
+écrire dans ces dossiers et lancer `docker compose`. L'accès au groupe `docker` équivaut à des
+privilèges élevés sur le VPS. Les fichiers `.env` restent sur le VPS : le workflow les exclut
+pendant la synchronisation et échoue explicitement si l'un manque.
 
 ### API
 
 Partir de `african-talents-api/.env.example`, le copier comme
-`/opt/african-talents/api/.env`, puis retirer les lignes `COMPOSE_FILE` et
+`/home/socoprocaap/web/apps/api/.env`, puis retirer les lignes `COMPOSE_FILE` et
 `COMPOSE_PATH_SEPARATOR` (elles activent la configuration locale de développement). Régler
 au minimum :
 
 - `DJANGO_SETTINGS_MODULE=config.settings.prod`, `DEBUG=False` et une `SECRET_KEY` aléatoire
   de production d'au moins 40 caractères ;
-- `ALLOWED_HOSTS` avec le domaine API ;
-- `CORS_ALLOWED_ORIGINS` et `CSRF_TRUSTED_ORIGINS` avec les domaines du site et de l'admin,
-  en HTTPS ;
+- `ALLOWED_HOSTS=api-african.socoprocaap.com` ;
+- `CORS_ALLOWED_ORIGINS` et `CSRF_TRUSTED_ORIGINS` avec
+  `https://african-talents.socoprocaap.com` et
+  `https://admin-african-talents.socoprocaap.com` ;
 - `POSTGRES_PASSWORD` avec un mot de passe fort et unique ;
 - les clés de paiement et URLs de retour/webhook correspondant à l'environnement choisi.
 
@@ -61,7 +57,8 @@ exécute migrations et `collectstatic` au démarrage selon les variables de prod
 
 ### Site public et admin
 
-Créer `/opt/african-talents/site/.env` et `/opt/african-talents/admin/.env`. Chaque fichier doit
+Créer `/home/socoprocaap/web/apps/site/.env` et
+`/home/socoprocaap/web/apps/admin/.env`. Chaque fichier doit
 contenir l'URL publique de l'API, utilisée lors de la compilation Vite :
 
 ```dotenv
@@ -75,6 +72,9 @@ Pour l'admin, utiliser le port `8081` :
 VITE_API_BASE_URL=https://api.example.com/api/v1
 ADMIN_SITE_PORT=8081
 ```
+
+Dans les deux fichiers `.env`, remplacer `https://api.example.com/api/v1` par
+`https://api-african.socoprocaap.com/api/v1`.
 
 Le site et l'admin sont servis par Nginx dans des conteneurs distincts. Le fallback SPA permet
 aux routes Vue d'être rechargées directement.
@@ -108,5 +108,5 @@ concerné. Son workflow lance les contrôles, puis déploie automatiquement le s
 Une pull request ne déploie jamais. Un déploiement manuel du dernier commit de `main` est
 également disponible dans l'onglet **Actions** via `workflow_dispatch`.
 
-Les domaines, DNS, Caddy, les fichiers `.env` de production et les identifiants GitHub doivent
-être configurés une fois sur le VPS/GitHub ; ils ne sont pas créés par un push.
+Les domaines, DNS, certificats Hestia, proxy Nginx, fichiers `.env` et identifiants GitHub
+doivent être configurés une fois ; ils ne sont pas créés par un push.

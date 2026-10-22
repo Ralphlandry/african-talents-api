@@ -88,6 +88,6 @@ jobs:
             --exclude='*.sqlite3' \
             --exclude='media/' \
             --exclude='staticfiles/' \
-            -e "ssh $ssh_args" ./ "$VPS_USER@$VPS_HOST:/opt/african-talents/api/"
+            -e "ssh $ssh_args" ./ "$VPS_USER@$VPS_HOST:/home/socoprocaap/web/apps/api/"
           ssh $ssh_args "$VPS_USER@$VPS_HOST" \
-            'set -eu; test -f /opt/african-talents/api/.env; cd /opt/african-talents/api; docker compose -f docker-compose.yml up -d --build --remove-orphans --wait --wait-timeout 240'
+            'set -eu; test -f /home/socoprocaap/web/apps/api/.env; cd /home/socoprocaap/web/apps/api; docker compose -f docker-compose.yml up -d --build --remove-orphans --wait --wait-timeout 240'
