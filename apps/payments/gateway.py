@@ -105,7 +105,11 @@ class HRSkillsPayClient:
         response = self._raw_request(
             "POST", "/v1/auth/transaction-token",
             json={"api_secret": self.secret_key},
-            headers={"Authorization": f"Bearer {self.public_key}"},
+            headers={
+                "Authorization": f"Bearer {self.public_key}",
+                "X-API-KEY": self.public_key,
+                "X-API-Secret": self.secret_key,
+            },
             authenticated=False,
         )
         token = _extract(response, "token", "transaction_token", "access_token")
@@ -124,7 +128,8 @@ class HRSkillsPayClient:
         url = f"{self.base_url}{self._path(path)}"
         final_headers = {"Content-Type": "application/json", **(headers or {})}
         if authenticated:
-            final_headers["Authorization"] = f"Bearer {self.public_key}"
+            final_headers["Authorization"] = f"Bearer {self.secret_key}"
+            final_headers["X-API-KEY"] = self.public_key
             final_headers["X-Transaction-Token"] = self._get_transaction_token()
 
         try:

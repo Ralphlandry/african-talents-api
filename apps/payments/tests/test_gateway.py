@@ -71,8 +71,11 @@ def test_payin_fetches_token_then_calls_endpoint(settings):
     assert token_call["method"] == "POST"
     assert token_call["url"].endswith("/sandbox/v1/auth/transaction-token")
     assert token_call["headers"]["Authorization"] == "Bearer hrsk_pk_test_uniq1"
+    assert token_call["headers"]["X-API-KEY"] == "hrsk_pk_test_uniq1"
+    assert token_call["headers"]["X-API-Secret"] == "hrsk_sk_test_uniq1"
     assert token_call["json"] == {"api_secret": "hrsk_sk_test_uniq1"}
-    assert session.calls[1]["headers"]["Authorization"] == "Bearer hrsk_pk_test_uniq1"
+    assert session.calls[1]["headers"]["Authorization"] == "Bearer hrsk_sk_test_uniq1"
+    assert session.calls[1]["headers"]["X-API-KEY"] == "hrsk_pk_test_uniq1"
     assert session.calls[1]["headers"]["X-Transaction-Token"] == "tok-123"
     assert session.calls[1]["headers"]["Idempotency-Key"] == "AT-2026-000001"
     assert "/sandbox" in session.calls[1]["url"]  # préfixe sandbox appliqué en environnement "test"
@@ -102,7 +105,8 @@ def test_card_payin_uses_hosted_checkout_and_card_status_endpoint(settings):
     assert status["status"] == "CAPTURED"
     assert status["amount_xaf"] == 1000
     assert session.calls[1]["url"].endswith("/sandbox/api/v1/payments/card")
-    assert session.calls[1]["headers"]["Authorization"] == "Bearer hrsk_pk_test_card1"
+    assert session.calls[1]["headers"]["Authorization"] == "Bearer hrsk_sk_test_card1"
+    assert session.calls[1]["headers"]["X-API-KEY"] == "hrsk_pk_test_card1"
     assert session.calls[1]["json"]["currency"] == "XAF"
     assert session.calls[2]["url"].endswith("/sandbox/api/v1/payments/card/card_ref_1")
 
