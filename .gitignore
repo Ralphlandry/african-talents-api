@@ -5,8 +5,8 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
-media/
-staticfiles/
+/media/
+/staticfiles/
 *.sqlite3
 .venv/
 venv/

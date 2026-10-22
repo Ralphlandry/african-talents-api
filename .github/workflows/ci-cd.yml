@@ -86,8 +86,8 @@ jobs:
             --exclude='.pytest_cache/' \
             --exclude='.ruff_cache/' \
             --exclude='*.sqlite3' \
-            --exclude='media/' \
-            --exclude='staticfiles/' \
+            --exclude='/media/' \
+            --exclude='/staticfiles/' \
             -e "ssh $ssh_args" ./ "$VPS_USER@$VPS_HOST:/home/socoprocaap/web/apps/api/"
           ssh $ssh_args "$VPS_USER@$VPS_HOST" \
             'set -eu; test -f /home/socoprocaap/web/apps/api/.env; cd /home/socoprocaap/web/apps/api; docker compose -f docker-compose.yml up -d --build --remove-orphans --wait --wait-timeout 240'

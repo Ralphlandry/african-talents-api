@@ -4,5 +4,7 @@ __pycache__
 *.pyc
 .pytest_cache
 .venv
-media
-staticfiles
+/media
+!apps/media
+!apps/media/**
+/staticfiles
