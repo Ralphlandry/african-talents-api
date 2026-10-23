@@ -90,6 +90,10 @@ def _draw_star(pdf, x, y, radius, color):
     pdf.drawPath(path, fill=1, stroke=0)
 
 
+def _ticket_event_date_label():
+    return "20, 21 et 22 novembre"
+
+
 def _basic_ticket_pdf(order):
     template_path = Path(__file__).resolve().parent / "assets" / "ticket-basic-template.png"
     template = ImageReader(str(template_path))
@@ -107,11 +111,7 @@ def _basic_ticket_pdf(order):
     pdf.rect(0, 0, width, height, fill=1, stroke=0)
     pdf.drawImage(template, 0, footer_height, width=width, height=image_display_height)
 
-    weekdays = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
-    months = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
-    event_date = order.ticket_type.competition.start_date
-    date_label = f"{weekdays[event_date.weekday()]} {event_date.day} {months[event_date.month - 1]}"
-    event_label = f"{date_label} · 15 H · À la salle ARENA Bonamoussadi, Douala"
+    event_label = f"{_ticket_event_date_label()} · à partir de 15 H · À la salle ARENA Bonamoussadi, Douala"
     pdf.setFillColor(colors.HexColor("#050D2B"))
     pdf.rect(87 * scale, footer_height + 31 * scale, 475 * scale, 25 * scale, fill=1, stroke=0)
     pdf.setFillColor(colors.HexColor("#FFF9E9"))
@@ -194,11 +194,7 @@ def _classic_ticket_pdf(order):
     pdf.drawCentredString(0, 0, pass_name)
     pdf.restoreState()
 
-    event_date = order.ticket_type.competition.start_date
-    weekdays = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
-    months = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
-    date_label = f"{weekdays[event_date.weekday()]} {event_date.day} {months[event_date.month - 1]}"
-    event_label = f"{date_label} · 15 H · ARENA Bonamoussadi, Douala"
+    event_label = f"{_ticket_event_date_label()} · à partir de 15 H · ARENA Bonamoussadi, Douala"
 
     pdf.setFillColor(colors.HexColor("#050D2B"))
     pdf.rect(145 * scale, footer_height + 48 * scale, 720 * scale, 50 * scale, fill=1, stroke=0)
@@ -266,11 +262,7 @@ def _vip_ticket_pdf(order):
     pdf.drawCentredString(0, 0, "PASS PREMIUM")
     pdf.restoreState()
 
-    event_date = order.ticket_type.competition.start_date
-    weekdays = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
-    months = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
-    date_label = f"{weekdays[event_date.weekday()]} {event_date.day} {months[event_date.month - 1]}"
-    event_label = f"{date_label} · 15 H · À la salle ARENA Bonamoussadi, Douala"
+    event_label = f"{_ticket_event_date_label()} · à partir de 15 H · À la salle ARENA Bonamoussadi, Douala"
 
     pdf.setFillColor(colors.HexColor("#050D2B"))
     pdf.rect(65 * scale, footer_height + 48 * scale, 900 * scale, 50 * scale, fill=1, stroke=0)
@@ -454,11 +446,10 @@ def _ticket_pdf(order):
     pdf.drawCentredString(terms_center, split_y - 6 * mm, "ACCÈS À LA SALLE")
     pdf.setFillColor(pale_gold)
     pdf.setFont("Helvetica-Bold", 5.8)
-    event_date = order.ticket_type.competition.start_date.strftime("%d/%m/%Y")
     pdf.drawCentredString(
         terms_center,
         split_y - 11 * mm,
-        f"{event_date} · 15 H · ARENA BONAMOUSSADI, DOUALA",
+        f"{_ticket_event_date_label()} · dès 15 H · ARENA BONAMOUSSADI, DOUALA",
     )
     pdf.setFillColor(gold)
     perk = (

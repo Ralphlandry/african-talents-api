@@ -263,6 +263,7 @@ def test_basic_ticket_pdf_shows_price_and_only_room_access(api, ticket_type, mon
     assert response.content.startswith(b"%PDF")
     assert "PASS BASIC · 1 000 FCFA" in rendered_text
     assert "ACCÈS À LA SALLE" in rendered_text
+    assert any("20, 21 et 22 novembre" in text and "15 H" in text for text in rendered_text)
     assert not any("BOISSON" in text or "PHOTOS" in text for text in rendered_text)
 
 
