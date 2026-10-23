@@ -29,8 +29,8 @@ def ticket_type(make_competition):
     competition.save(update_fields=["ticket_sales_open"])
     return TicketType.objects.create(
         competition=competition,
-        ticket_class=TicketType.CLASSIC,
-        label="Billet classique",
+        ticket_class=TicketType.STANDARD,
+        label="Pass Standard",
         price_xaf=5000,
     )
 
@@ -40,14 +40,20 @@ def test_public_ticket_types_only_show_active_current_competition(api, ticket_ty
     other_competition = make_competition(name="Autre", is_current=False)
     TicketType.objects.create(
         competition=ticket_type.competition,
-        ticket_class=TicketType.VIP,
-        label="Billet VIP",
+        ticket_class=TicketType.BASIC,
+        label="Pass Basic",
+        price_xaf=1000,
+    )
+    TicketType.objects.create(
+        competition=ticket_type.competition,
+        ticket_class=TicketType.PREMIUM,
+        label="Pass Premium",
         price_xaf=10000,
         is_active=False,
     )
     TicketType.objects.create(
         competition=other_competition,
-        ticket_class=TicketType.CLASSIC,
+        ticket_class=TicketType.STANDARD,
         label="Ancien billet",
         price_xaf=3000,
     )
@@ -55,7 +61,7 @@ def test_public_ticket_types_only_show_active_current_competition(api, ticket_ty
     response = api.get(f"{PUBLIC}/ticket-types/")
 
     assert response.status_code == 200
-    assert [item["label"] for item in response.json()] == ["Billet classique"]
+    assert [item["ticket_class"] for item in response.json()] == ["BASIC", "STANDARD"]
 
 
 @pytest.mark.django_db
@@ -191,8 +197,8 @@ def test_vip_ticket_pdf_includes_vip_access_benefits(api, monkeypatch, ticket_ty
     monkeypatch.setattr(Canvas, "setFont", track_set_font)
     vip_type = TicketType.objects.create(
         competition=ticket_type.competition,
-        ticket_class=TicketType.VIP,
-        label="Billet VIP",
+        ticket_class=TicketType.PREMIUM,
+        label="Pack Premium",
         price_xaf=10000,
     )
     order = TicketOrder.objects.create(
@@ -212,14 +218,82 @@ def test_vip_ticket_pdf_includes_vip_access_benefits(api, monkeypatch, ticket_ty
     assert b"/Subtype /Image" in response.content
     assert "AT-" in order.ticket_code
     assert order.ticket_code in rendered_text
-    assert "ACCÈS AUX PREMIÈRES PLACES + BOISSON" in rendered_text
-    assert ("ACCÈS AUX PREMIÈRES PLACES + BOISSON", 14) in rendered_text_sizes
-    assert "+ PHOTOS AVEC LES STARS" in rendered_text
-    assert ("+ PHOTOS AVEC LES STARS", 14) in rendered_text_sizes
+    assert "PASS PREMIUM" in rendered_text
+    assert "ACCÈS À LA SALLE · BOISSON INCLUSE" in rendered_text
+    assert ("ACCÈS À LA SALLE · BOISSON INCLUSE", 12) in rendered_text_sizes
+    assert "PREMIÈRES PLACES · PHOTO AVEC LES STARS" in rendered_text
+    assert ("PREMIÈRES PLACES · PHOTO AVEC LES STARS", 12) in rendered_text_sizes
     assert "Ce billet n’admet qu’une seule personne." not in rendered_text
     assert "Ce billet ne peut être remplacé s’il est perdu, volé" not in rendered_text
     assert "Toutes les ventes de billets sont définitives et" not in rendered_text
     assert any("15 H" in text for text in rendered_text)
+
+
+@pytest.mark.django_db
+def test_basic_ticket_pdf_shows_price_and_only_room_access(api, ticket_type, monkeypatch):
+    from reportlab.pdfgen.canvas import Canvas
+
+    rendered_text = []
+    draw_centred_string = Canvas.drawCentredString
+
+    def track_drawn_text(pdf, x, y, text):
+        rendered_text.append(text)
+        return draw_centred_string(pdf, x, y, text)
+
+    basic_type = TicketType.objects.create(
+        competition=ticket_type.competition,
+        ticket_class=TicketType.BASIC,
+        label="Pass Basic",
+        price_xaf=1000,
+    )
+    order = TicketOrder.objects.create(
+        ticket_type=basic_type,
+        buyer_first_name="Amina",
+        buyer_last_name="Njoya",
+        customer_phone="+237655500001",
+        amount_xaf=basic_type.price_xaf,
+        operator="MTN",
+        status=TicketOrder.PAID,
+        idempotency_key="basic-ticket-pdf",
+    )
+    monkeypatch.setattr(Canvas, "drawCentredString", track_drawn_text)
+    response = api.get(f"{PUBLIC}/ticket-orders/{order.order_number}/pdf/")
+
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF")
+    assert "PASS BASIC · 1 000 FCFA" in rendered_text
+    assert "ACCÈS À LA SALLE" in rendered_text
+    assert not any("BOISSON" in text or "PHOTOS" in text for text in rendered_text)
+
+
+@pytest.mark.django_db
+def test_standard_ticket_pdf_includes_room_access_and_drink(api, ticket_type, monkeypatch):
+    from reportlab.pdfgen.canvas import Canvas
+
+    rendered_text = []
+    draw_centred_string = Canvas.drawCentredString
+
+    def track_drawn_text(pdf, x, y, text):
+        rendered_text.append(text)
+        return draw_centred_string(pdf, x, y, text)
+
+    order = TicketOrder.objects.create(
+        ticket_type=ticket_type,
+        buyer_first_name="Amina",
+        buyer_last_name="Njoya",
+        customer_phone="+237655500001",
+        amount_xaf=ticket_type.price_xaf,
+        operator="MTN",
+        status=TicketOrder.PAID,
+        idempotency_key="standard-ticket-benefits",
+    )
+    monkeypatch.setattr(Canvas, "drawCentredString", track_drawn_text)
+    response = api.get(f"{PUBLIC}/ticket-orders/{order.order_number}/pdf/")
+
+    assert response.status_code == 200
+    assert "ACCÈS À LA SALLE" in rendered_text
+    assert "BOISSON INCLUSE" in rendered_text
+    assert not any("PREMIÈRES PLACES" in text or "PHOTO" in text for text in rendered_text)
 
 
 @pytest.mark.django_db

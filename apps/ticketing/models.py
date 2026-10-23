@@ -14,9 +14,14 @@ def generate_ticket_code():
 
 
 class TicketType(BaseModel):
-    CLASSIC = "CLASSIC"
-    VIP = "VIP"
-    TYPE_CHOICES = [(CLASSIC, "Classique"), (VIP, "VIP")]
+    BASIC = "BASIC"
+    STANDARD = "STANDARD"
+    PREMIUM = "PREMIUM"
+    TYPE_CHOICES = [
+        (BASIC, "Basic"),
+        (STANDARD, "Standard"),
+        (PREMIUM, "Premium"),
+    ]
 
     competition = models.ForeignKey("competition.Competition", on_delete=models.CASCADE, related_name="ticket_types")
     ticket_class = models.CharField(max_length=12, choices=TYPE_CHOICES)

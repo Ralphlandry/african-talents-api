@@ -90,13 +90,13 @@ def _draw_star(pdf, x, y, radius, color):
     pdf.drawPath(path, fill=1, stroke=0)
 
 
-def _classic_ticket_pdf(order):
-    template_path = Path(__file__).resolve().parent / "assets" / "ticket-classic-template.png"
+def _basic_ticket_pdf(order):
+    template_path = Path(__file__).resolve().parent / "assets" / "ticket-basic-template.png"
     template = ImageReader(str(template_path))
     image_width, image_height = template.getSize()
     width = 320 * mm
     image_display_height = width * image_height / image_width
-    footer_height = 18 * mm
+    footer_height = 25 * mm
     height = image_display_height + footer_height
     scale = width / image_width
     output = BytesIO()
@@ -106,6 +106,93 @@ def _classic_ticket_pdf(order):
     pdf.setFillColor(colors.HexColor("#030817"))
     pdf.rect(0, 0, width, height, fill=1, stroke=0)
     pdf.drawImage(template, 0, footer_height, width=width, height=image_display_height)
+
+    weekdays = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
+    months = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
+    event_date = order.ticket_type.competition.start_date
+    date_label = f"{weekdays[event_date.weekday()]} {event_date.day} {months[event_date.month - 1]}"
+    event_label = f"{date_label} · 15 H · À la salle ARENA Bonamoussadi, Douala"
+    pdf.setFillColor(colors.HexColor("#050D2B"))
+    pdf.rect(87 * scale, footer_height + 31 * scale, 475 * scale, 25 * scale, fill=1, stroke=0)
+    pdf.setFillColor(colors.HexColor("#FFF9E9"))
+    pdf.setFont("Helvetica-Bold", 7)
+    pdf.drawCentredString(325 * scale, footer_height + 39 * scale, event_label)
+
+    pdf.setFillColor(colors.HexColor("#030A20"))
+    pdf.rect(564 * scale, footer_height, 74 * scale, image_display_height, fill=1, stroke=0)
+    pdf.saveState()
+    pdf.translate(601 * scale, footer_height + image_display_height / 2)
+    pdf.rotate(90)
+    pdf.setFillColor(colors.HexColor("#FFF9E9"))
+    pdf.setFont("Helvetica-Bold", 9)
+    pass_label = f"PASS BASIC · {order.amount_xaf:,}".replace(",", " ") + " FCFA"
+    pdf.drawCentredString(0, 0, pass_label)
+    pdf.restoreState()
+
+    pdf.setStrokeColor(colors.HexColor("#E5B83F"))
+    pdf.setLineWidth(1)
+    pdf.line(0, footer_height, width, footer_height)
+    pdf.setFillColor(colors.HexColor("#E5B83F"))
+    pdf.setFont("Helvetica-Bold", 7)
+    pdf.drawString(8 * mm, 18 * mm, "TITULAIRE")
+    holder_name = f"{order.buyer_first_name} {order.buyer_last_name}"
+    pdf.setFillColor(colors.HexColor("#FFF9E9"))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(8 * mm, 11 * mm, holder_name[:52])
+    pdf.setFillColor(colors.HexColor("#E5B83F"))
+    pdf.setFont("Helvetica-Bold", 7)
+    pdf.drawString(105 * mm, 18 * mm, "NUMÉRO UNIQUE")
+    pdf.setFillColor(colors.HexColor("#FFF9E9"))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(105 * mm, 11 * mm, order.ticket_code)
+    pdf.setFillColor(colors.HexColor("#E5B83F"))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawCentredString(202 * mm, 11 * mm, "ACCÈS À LA SALLE")
+    qr = QrCodeWidget(order.ticket_code)
+    qr.barLevel = "M"
+    qr_bounds = qr.getBounds()
+    qr_size = 18 * mm
+    qr_drawing = Drawing(qr_size, qr_size, transform=[
+        qr_size / (qr_bounds[2] - qr_bounds[0]), 0, 0,
+        qr_size / (qr_bounds[3] - qr_bounds[1]), 0, 0,
+    ])
+    qr_drawing.add(qr, name="ticket-code")
+    renderPDF.draw(qr_drawing, pdf, width - 23 * mm, 3 * mm)
+
+    pdf.showPage()
+    pdf.save()
+    return output.getvalue()
+
+
+def _classic_ticket_pdf(order):
+    template_path = Path(__file__).resolve().parent / "assets" / "ticket-classic-template.png"
+    template = ImageReader(str(template_path))
+    image_width, image_height = template.getSize()
+    width = 320 * mm
+    image_display_height = width * image_height / image_width
+    footer_height = 20 * mm
+    height = image_display_height + footer_height
+    scale = width / image_width
+    output = BytesIO()
+    pdf = canvas.Canvas(output, pagesize=(width, height), pageCompression=0)
+    pdf.setTitle(f"Billet African Talents - {order.ticket_code}")
+    pdf.setAuthor("African Talents")
+    pdf.setFillColor(colors.HexColor("#030817"))
+    pdf.rect(0, 0, width, height, fill=1, stroke=0)
+    pdf.drawImage(template, 0, footer_height, width=width, height=image_display_height)
+
+    pass_name = "PASS BASIC" if order.ticket_type.ticket_class == TicketType.BASIC else "PASS STANDARD"
+    if order.ticket_type.ticket_class == TicketType.BASIC:
+        pass_name += f" · {order.amount_xaf:,}".replace(",", " ") + " FCFA"
+    pdf.setFillColor(colors.HexColor("#030A20"))
+    pdf.rect(948 * scale, footer_height, 128 * scale, image_display_height, fill=1, stroke=0)
+    pdf.saveState()
+    pdf.translate(1012 * scale, footer_height + image_display_height / 2)
+    pdf.rotate(90)
+    pdf.setFillColor(colors.HexColor("#FFF9E9"))
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawCentredString(0, 0, pass_name)
+    pdf.restoreState()
 
     event_date = order.ticket_type.competition.start_date
     weekdays = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
@@ -143,8 +230,9 @@ def _classic_ticket_pdf(order):
     pdf.setLineWidth(1)
     pdf.line(0, footer_height, width, footer_height)
     pdf.setFillColor(colors.HexColor("#E5B83F"))
-    pdf.setFont("Helvetica-Bold", 13)
-    pdf.drawCentredString(width / 2, 6 * mm, "ACCÈS À LA SALLE")
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawCentredString(width / 2, 13 * mm, "ACCÈS À LA SALLE")
+    pdf.drawCentredString(width / 2, 5 * mm, "BOISSON INCLUSE")
 
     pdf.showPage()
     pdf.save()
@@ -167,6 +255,16 @@ def _vip_ticket_pdf(order):
     pdf.setFillColor(colors.HexColor("#030817"))
     pdf.rect(0, 0, width, height, fill=1, stroke=0)
     pdf.drawImage(template, 0, footer_height, width=width, height=image_display_height)
+
+    pdf.setFillColor(colors.HexColor("#030A20"))
+    pdf.rect(947 * scale, footer_height, 220 * scale, image_display_height, fill=1, stroke=0)
+    pdf.saveState()
+    pdf.translate(1057 * scale, footer_height + image_display_height / 2)
+    pdf.rotate(90)
+    pdf.setFillColor(colors.HexColor("#FFF9E9"))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawCentredString(0, 0, "PASS PREMIUM")
+    pdf.restoreState()
 
     event_date = order.ticket_type.competition.start_date
     weekdays = ("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
@@ -197,9 +295,9 @@ def _vip_ticket_pdf(order):
     pdf.setLineWidth(1)
     pdf.line(0, footer_height, width, footer_height)
     pdf.setFillColor(colors.HexColor("#E5B83F"))
-    pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawCentredString(width / 2, 14 * mm, "ACCÈS AUX PREMIÈRES PLACES + BOISSON")
-    pdf.drawCentredString(width / 2, 7 * mm, "+ PHOTOS AVEC LES STARS")
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawCentredString(width / 2, 14 * mm, "ACCÈS À LA SALLE · BOISSON INCLUSE")
+    pdf.drawCentredString(width / 2, 7 * mm, "PREMIÈRES PLACES · PHOTO AVEC LES STARS")
 
     pdf.showPage()
     pdf.save()
@@ -207,9 +305,11 @@ def _vip_ticket_pdf(order):
 
 
 def _ticket_pdf(order):
-    if order.ticket_type.ticket_class == TicketType.CLASSIC:
+    if order.ticket_type.ticket_class == TicketType.BASIC:
+        return _basic_ticket_pdf(order)
+    if order.ticket_type.ticket_class == TicketType.STANDARD:
         return _classic_ticket_pdf(order)
-    if order.ticket_type.ticket_class == TicketType.VIP:
+    if order.ticket_type.ticket_class == TicketType.PREMIUM:
         return _vip_ticket_pdf(order)
 
     width, height = 260 * mm, 105 * mm
@@ -308,7 +408,7 @@ def _ticket_pdf(order):
     pdf.rotate(90)
     pdf.setFillColor(gold)
     pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawCentredString(0, -2, "PASS VIP" if order.ticket_type.ticket_class == TicketType.VIP else "PASS CLASSIQUE")
+    pdf.drawCentredString(0, -2, "PASS PREMIUM")
     pdf.restoreState()
 
     pdf.saveState()
@@ -362,9 +462,11 @@ def _ticket_pdf(order):
     )
     pdf.setFillColor(gold)
     perk = (
-        "VIP : PREMIÈRES PLACES · BOISSON · PHOTOS AVEC LES STARS"
-        if order.ticket_type.ticket_class == TicketType.VIP
-        else "PASS CLASSIQUE · ACCÈS À LA FINALE"
+        "PREMIUM : ACCÈS SALLE · BOISSON · PREMIÈRES PLACES · PHOTO AVEC LES STARS"
+        if order.ticket_type.ticket_class == TicketType.PREMIUM
+        else "PASS BASIC · ACCÈS À LA SALLE"
+        if order.ticket_type.ticket_class == TicketType.BASIC
+        else "PASS STANDARD · ACCÈS À LA SALLE · BOISSON INCLUSE"
     )
     pdf.drawCentredString(terms_center, split_y - 16 * mm, perk)
     pdf.setFillColor(white)
