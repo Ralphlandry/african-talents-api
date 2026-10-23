@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Max
 
 from apps.audit.constants import AuditAction as A
 from apps.audit.constants import AuditModule as M
@@ -9,7 +10,9 @@ from .models import TeamMember
 
 @transaction.atomic
 def create_member(actor, *, request=None, **fields):
-    fields.setdefault("order", TeamMember.objects.filter(type=fields.get("type")).count() + 1)
+    if "order" not in fields:
+        last_order = TeamMember.objects.filter(type=fields.get("type")).aggregate(max_order=Max("order"))["max_order"] or 0
+        fields["order"] = last_order + 1
     member = TeamMember.objects.create(**fields)
     record(request=request, actor=actor, action=A.TEAM_MEMBER_CREATED, module=M.TEAM,
            resource="team_member", resource_id=member.pk, metadata={"name": member.full_name})

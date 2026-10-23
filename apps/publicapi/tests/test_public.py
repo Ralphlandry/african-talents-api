@@ -71,6 +71,18 @@ def test_only_visible_team_members_are_public(api):
 
 
 @pytest.mark.django_db
+def test_public_team_members_follow_configured_order(api):
+    from apps.team.models import TeamMember
+
+    TeamMember.objects.create(type="team", full_name="Troisième", order=3)
+    TeamMember.objects.create(type="team", full_name="Premier", order=1)
+    TeamMember.objects.create(type="team", full_name="Deuxième", order=2)
+
+    response = api.get(f"{PUBLIC}/team/").json()
+    assert [member["full_name"] for member in response] == ["Premier", "Deuxième", "Troisième"]
+
+
+@pytest.mark.django_db
 def test_candidates_filterable_by_category(api, make_competition, make_category, make_candidate):
     competition = make_competition()
     music = make_category("Musique", competition=competition)
