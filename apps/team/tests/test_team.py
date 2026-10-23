@@ -36,4 +36,4 @@ def test_team_member_custom_order_is_saved_and_used(auth_client, make_role, make
     assert updated.json()["order"] == 1
 
     invalid = client.patch(f"{TEAM}{first.json()['id']}/", {"order": 0}, format="json")
-    assert invalid.status_code == 400
+    assert invalid.status_code == 422
