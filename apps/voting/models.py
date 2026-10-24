@@ -1,4 +1,6 @@
 
+import secrets
+
 from django.conf import settings
 from django.db import models
 
@@ -77,11 +79,9 @@ class VoteOrder(BaseModel):
 
         year = timezone.now().year
         seq = VoteOrder.objects.filter(order_number__startswith=f"AT-{year}-").count() + 1
-        candidate_number = f"AT-{year}-{seq:06d}"
-        # Filet anti-collision (concurrence) : incrémente jusqu'à trouver un numéro libre.
+        candidate_number = f"AT-{year}-{seq:06d}-{secrets.token_hex(6).upper()}"
         while VoteOrder.objects.filter(order_number=candidate_number).exists():
-            seq += 1
-            candidate_number = f"AT-{year}-{seq:06d}"
+            candidate_number = f"AT-{year}-{seq:06d}-{secrets.token_hex(6).upper()}"
         return candidate_number
 
 

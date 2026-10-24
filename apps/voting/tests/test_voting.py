@@ -55,6 +55,38 @@ def test_create_order_is_idempotent(make_competition, make_category, make_candid
     assert order1.pk == order2.pk
     assert order1.amount_xaf == 1000 and order1.quantity == 10
     assert order1.order_number.startswith("AT-")
+    assert len(order1.order_number.rsplit("-", 1)[-1]) == 12
+
+
+@pytest.mark.django_db
+def test_new_vote_orders_have_distinct_provider_references(
+    make_competition, make_category, make_candidate, make_vote_package
+):
+    from apps.voting.services import create_order
+
+    competition = make_competition(votes_open=True)
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    package = make_vote_package(competition)
+
+    first_order, _ = create_order(
+        candidate=candidate,
+        vote_package=package,
+        phone="+237655500001",
+        operator="MTN",
+        idempotency_key="unique-reference-1",
+    )
+    second_order, _ = create_order(
+        candidate=candidate,
+        vote_package=package,
+        phone="+237655500001",
+        operator="MTN",
+        idempotency_key="unique-reference-2",
+    )
+
+    assert first_order.order_number != second_order.order_number
+    assert first_order.order_number.startswith("AT-")
+    assert second_order.order_number.startswith("AT-")
 
 
 @pytest.mark.django_db
