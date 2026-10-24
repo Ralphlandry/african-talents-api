@@ -32,6 +32,7 @@ class FakeGatewayClient:
     def create_mobile_money_payin(self, **kwargs):
         if self.raise_on_payin:
             raise self.raise_on_payin
+        self.payin_kwargs = kwargs
         return self.payin_result
 
     def get_payment_status(self, reference):
@@ -90,6 +91,29 @@ def test_initiate_payment_creates_pending_payment(monkeypatch, order):
     assert payment.status == Payment.PENDING
     assert payment.provider_reference == "HRS-42"
     assert payment.reference == order.order_number
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("phone", "expected_phone"),
+    [
+        ("+237655500001", "655500001"),
+        ("00237655500001", "655500001"),
+        ("237655500001", "655500001"),
+        ("655500001", "655500001"),
+    ],
+)
+def test_mobile_money_payin_uses_cameroon_national_number(monkeypatch, order, phone, expected_phone):
+    from apps.payments import services
+
+    order.customer_phone = phone
+    order.save(update_fields=["customer_phone", "updated_at"])
+    fake = FakeGatewayClient()
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+
+    services.initiate_payment(order)
+
+    assert fake.payin_kwargs["phone_number"] == expected_phone
 
 
 @pytest.mark.django_db
@@ -208,6 +232,26 @@ def test_card_status_is_verified_and_capture_credits_votes(monkeypatch, order, m
     assert order.status == VoteOrder.PAID
     assert fake.card_status_reference == "CARD-42"
     assert Vote.objects.get(vote_order=order).quantity == order.quantity
+
+
+@pytest.mark.django_db
+def test_failed_status_keeps_provider_failure_reason(monkeypatch, order, make_payment):
+    from apps.payments import services
+
+    payment = make_payment(order, status=Payment.PENDING, provider_reference="HRS-FAILED")
+    fake = FakeGatewayClient(status_result={
+        "status": Payment.FAILED,
+        "amount_xaf": order.amount_xaf,
+        "currency": "XAF",
+        "raw": {"data": {"reason": "Solde insuffisant"}},
+    })
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+
+    services.refresh_pending_payment(payment)
+
+    payment.refresh_from_db()
+    assert payment.status == Payment.FAILED
+    assert payment.failure_reason == "Solde insuffisant"
 
 
 @pytest.mark.django_db

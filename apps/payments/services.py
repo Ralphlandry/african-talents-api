@@ -21,6 +21,31 @@ from .models import Payment, PaymentEvent
 logger = logging.getLogger(__name__)
 STATUS_SYNC_CACHE_SECONDS = 10
 
+
+def _mobile_money_phone_number(phone):
+    if phone.startswith("+237"):
+        return phone[4:]
+    if phone.startswith("00237"):
+        return phone[5:]
+    if phone.startswith("237") and len(phone) == 12:
+        return phone[3:]
+    return phone
+
+
+def _provider_failure_reason(verified, fallback):
+    raw = verified.get("raw")
+    if not isinstance(raw, dict):
+        return fallback
+    data = raw.get("data")
+    sources = (data, raw) if isinstance(data, dict) else (raw,)
+    for source in sources:
+        for field in ("failure_reason", "decline_reason", "error_description", "error_message", "reason"):
+            value = source.get(field)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:255]
+    return fallback
+
+
 # Transitions autorisées (machine à états monotone — un état terminal ne redevient jamais actif).
 _ALLOWED_TRANSITIONS = {
     Payment.PENDING: {Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED, Payment.HOLD},
@@ -106,7 +131,8 @@ def initiate_payment(order, *, request=None):
             )
         else:
             result = client.create_mobile_money_payin(
-                reference=order.order_number, amount_xaf=order.amount_xaf, phone_number=order.customer_phone,
+                reference=order.order_number, amount_xaf=order.amount_xaf,
+                phone_number=_mobile_money_phone_number(order.customer_phone),
                 operator=order.operator, description=description, metadata=metadata,
                 idempotency_key=order.idempotency_key,
             )
@@ -252,7 +278,11 @@ def refresh_pending_payment(payment, *, request=None):
         status,
         fees_xaf=verified.get("fees_xaf"),
         net_amount_xaf=verified.get("net_amount_xaf"),
-        reason="Statut confirmé par resynchronisation HR-Skills Pay.",
+        reason=(
+            _provider_failure_reason(verified, "Paiement refusé par le prestataire.")
+            if status == Payment.FAILED
+            else "Statut confirmé par resynchronisation HR-Skills Pay."
+        ),
         request=request,
     )
 
@@ -368,7 +398,11 @@ def _process_event(event, payload):
     apply_status(
         payment, verified_status,
         fees_xaf=verified.get("fees_xaf"), net_amount_xaf=verified.get("net_amount_xaf"),
-        reason=f"webhook:{event.event_type or event_data.get('event_type', '')}",
+        reason=(
+            _provider_failure_reason(verified, f"webhook:{event.event_type or event_data.get('event_type', '')}")
+            if verified_status == Payment.FAILED
+            else f"webhook:{event.event_type or event_data.get('event_type', '')}"
+        ),
     )
 
 
