@@ -85,7 +85,7 @@ def initiate_payment(order, *, request=None):
     if is_ticket_order:
         metadata.update({"ticket_class": order.ticket_type.ticket_class})
         if order.promo_candidate_id:
-            metadata["candidate_code"] = order.promo_candidate.code
+            metadata["candidate_code"] = order.promo_candidate.promo_code or order.promo_candidate.code
     else:
         metadata["candidate_code"] = order.candidate.code
 

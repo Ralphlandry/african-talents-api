@@ -510,7 +510,7 @@ class TicketStatisticsView(APIView):
                 {
                     "candidate_id": str(candidate.pk),
                     "name": candidate.display_name,
-                    "code": candidate.code,
+                    "code": candidate.promo_code or candidate.code,
                     "points": candidate.ticket_sales,
                     "tickets_sold": candidate.ticket_sales,
                 }

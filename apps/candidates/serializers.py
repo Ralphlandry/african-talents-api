@@ -23,7 +23,7 @@ class CandidateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Candidate
         fields = [
-            "id", "competition", "category", "category_name", "current_phase", "code",
+            "id", "competition", "category", "category_name", "current_phase", "code", "promo_code",
             "first_name", "last_name", "display_name", "slug", "bio", "city", "country",
             "photo", "photo_id", "gallery", "gallery_ids",
             "facebook_url", "instagram_url", "tiktok_url",
@@ -37,6 +37,17 @@ class CandidateSerializer(serializers.ModelSerializer):
 
     def validate_code(self, value):
         return value.strip().upper()
+
+    def validate_promo_code(self, value):
+        if not value:
+            return None
+        value = value.strip().upper()
+        candidates = Candidate.all_objects.filter(promo_code__iexact=value)
+        if self.instance:
+            candidates = candidates.exclude(pk=self.instance.pk)
+        if candidates.exists():
+            raise serializers.ValidationError("Ce code promo est déjà attribué à un candidat.")
+        return value
 
 
 class CandidateWriteSerializer(CandidateSerializer):

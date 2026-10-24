@@ -30,16 +30,20 @@ def test_no_current_competition_returns_null_not_error(api):
 def test_only_published_active_candidates_are_public(api, make_competition, make_category, make_candidate):
     competition = make_competition()
     category = make_category(competition=competition)
-    visible = make_candidate(competition, category, code="AT-001", status="published", is_active=True)
+    visible = make_candidate(
+        competition, category, code="AT-001", promo_code="AMINA2026", status="published", is_active=True
+    )
     make_candidate(competition, category, code="AT-002", status="draft", is_active=True)
     make_candidate(competition, category, code="AT-003", status="published", is_active=False)
 
     response = api.get(f"{PUBLIC}/candidates/")
     codes = [c["code"] for c in response.json()["results"]]
     assert codes == ["AT-001"]
+    assert response.json()["results"][0]["promo_code"] == "AMINA2026"
 
     detail = api.get(f"{PUBLIC}/candidates/{visible.slug}/")
     assert detail.status_code == 200 and detail.json()["display_name"] == "Dupont Jean"
+    assert detail.json()["promo_code"] == "AMINA2026"
 
 
 @pytest.mark.django_db

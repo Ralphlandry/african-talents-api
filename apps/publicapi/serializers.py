@@ -52,7 +52,10 @@ class PublicCandidateListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Candidate
-        fields = ["id", "code", "slug", "display_name", "city", "country", "photo", "category", "votes_total"]
+        fields = [
+            "id", "code", "promo_code", "slug", "display_name", "city", "country",
+            "photo", "category", "votes_total",
+        ]
 
     def get_votes_total(self, obj) -> int:
         # Agrégation réelle branchée au jalon 3 (ledger de votes).

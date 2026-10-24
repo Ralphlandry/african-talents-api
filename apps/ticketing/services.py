@@ -70,7 +70,7 @@ def create_ticket_order(*, ticket_type, first_name, last_name, phone, operator, 
             "order_number": order.order_number,
             "ticket_class": ticket_type.ticket_class,
             "amount_xaf": order.amount_xaf,
-            "candidate_code": promo_candidate.code if promo_candidate else None,
+            "candidate_code": (promo_candidate.promo_code or promo_candidate.code) if promo_candidate else None,
         },
     )
     return order, True

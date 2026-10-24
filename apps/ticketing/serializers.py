@@ -49,12 +49,12 @@ class TicketOrderCreateSerializer(serializers.Serializer):
         if not value:
             return ""
         ticket_type = self.initial_data.get("ticket_type")
-        candidate = Candidate.objects.filter(
-            code__iexact=value,
-            competition__is_current=True,
-            status=Candidate.PUBLISHED,
-            is_active=True,
-        ).first()
+        candidates = Candidate.objects.filter(
+            competition__is_current=True, status=Candidate.PUBLISHED, is_active=True
+        )
+        candidate = candidates.filter(promo_code__iexact=value).first()
+        if candidate is None:
+            candidate = candidates.filter(promo_code__isnull=True, code__iexact=value).first()
         if candidate is None:
             raise serializers.ValidationError("Ce code promo ne correspond à aucun candidat actif.")
         ticket_competition_id = TicketType.objects.filter(pk=ticket_type, is_active=True).values_list(
@@ -72,9 +72,15 @@ class TicketOrderCreateSerializer(serializers.Serializer):
         if not ticket_type.competition.ticket_sales_open:
             raise serializers.ValidationError({"ticket_type": "La vente des billets est actuellement fermée."})
         if code:
-            attrs["promo_candidate"] = Candidate.objects.get(
-                code__iexact=code, competition=ticket_type.competition, status=Candidate.PUBLISHED, is_active=True
+            candidates = Candidate.objects.filter(
+                competition=ticket_type.competition, status=Candidate.PUBLISHED, is_active=True
             )
+            candidate = candidates.filter(promo_code__iexact=code).first()
+            if candidate is None:
+                candidate = candidates.filter(promo_code__isnull=True, code__iexact=code).first()
+            if candidate is None:
+                raise serializers.ValidationError({"promo_code": "Ce code promo n'appartient pas à la compétition du billet."})
+            attrs["promo_candidate"] = candidate
         return attrs
 
 
@@ -99,7 +105,9 @@ class TicketOrderStatusSerializer(serializers.ModelSerializer):
         return obj.promo_candidate.display_name if obj.promo_candidate_id else None
 
     def get_promo_code(self, obj):
-        return obj.promo_candidate.code if obj.promo_candidate_id else None
+        if not obj.promo_candidate_id:
+            return None
+        return obj.promo_candidate.promo_code or obj.promo_candidate.code
 
     def get_pdf_url(self, obj):
         return (

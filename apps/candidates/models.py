@@ -15,6 +15,7 @@ class Candidate(SoftDeleteModel):
         "competition.Phase", on_delete=models.SET_NULL, null=True, blank=True, related_name="candidates"
     )
     code = models.CharField(max_length=32)  # ex. "AT-001", unique par compétition
+    promo_code = models.CharField(max_length=32, unique=True, null=True, blank=True)
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     slug = models.SlugField(max_length=220)

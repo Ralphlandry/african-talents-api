@@ -14,11 +14,12 @@ def test_create_update_publish_candidate(auth_client, make_role, make_user, make
 
     created = client.post(CANDIDATES, {
         "competition": str(competition.pk), "category": str(category.pk), "code": "at-001",
-        "first_name": "Aminata", "last_name": "Diallo", "city": "Conakry",
+        "promo_code": "amina2026", "first_name": "Aminata", "last_name": "Diallo", "city": "Conakry",
     }, format="json")
     assert created.status_code == 201
     body = created.json()
     assert body["code"] == "AT-001"  # normalisé en majuscules
+    assert body["promo_code"] == "AMINA2026"
     assert body["status"] == "draft" and body["display_name"] == "Diallo Aminata"
 
     updated = client.patch(f"{CANDIDATES}{body['id']}/", {"city": "Dakar"}, format="json")
@@ -26,6 +27,32 @@ def test_create_update_publish_candidate(auth_client, make_role, make_user, make
 
     published = client.post(f"{CANDIDATES}{body['id']}/publish/")
     assert published.status_code == 200 and published.json()["status"] == "published"
+
+
+@pytest.mark.django_db
+def test_promo_code_must_be_unique_case_insensitively(
+    auth_client, make_role, make_user, make_competition, make_category
+):
+    competition = make_competition()
+    category = make_category(competition=competition)
+    user = make_user("promo-codes@example.com", make_role("Candidates", ["candidates.create"]))
+    client = auth_client(user)
+    payload = {
+        "competition": str(competition.pk),
+        "category": str(category.pk),
+        "code": "AT-001",
+        "promo_code": "FAN2026",
+        "first_name": "A",
+        "last_name": "One",
+    }
+    assert client.post(CANDIDATES, payload, format="json").status_code == 201
+    duplicate = client.post(
+        CANDIDATES,
+        {**payload, "code": "AT-002", "promo_code": "fan2026", "last_name": "Two"},
+        format="json",
+    )
+    assert duplicate.status_code == 422
+    assert "promo_code" in duplicate.json()["errors"]
 
 
 @pytest.mark.django_db

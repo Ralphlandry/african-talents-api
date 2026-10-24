@@ -120,7 +120,7 @@ def test_ticket_payment_confirmation_assigns_one_point_and_unlocks_pdf(
 
     competition = ticket_type.competition
     category = make_category(competition=competition)
-    candidate = make_candidate(competition, category, code="AT-001")
+    candidate = make_candidate(competition, category, code="AT-001", promo_code="AMINA2026")
     fake = FakeGatewayClient()
     monkeypatch.setattr(payment_services, "build_client_from_settings", lambda: fake)
     payload = {
@@ -129,7 +129,7 @@ def test_ticket_payment_confirmation_assigns_one_point_and_unlocks_pdf(
         "last_name": "Njoya",
         "phone": "+237655500001",
         "operator": "MTN",
-        "promo_code": "at-001",
+        "promo_code": "amina2026",
         "idempotency_key": "ticket-order-flow-1",
         "accept_terms": True,
         "amount_xaf": 1,
@@ -144,6 +144,7 @@ def test_ticket_payment_confirmation_assigns_one_point_and_unlocks_pdf(
     assert len(order.ticket_code) == 15
     assert order.status == TicketOrder.PENDING
     assert order.promo_candidate == candidate
+    assert created.json()["promo_code"] == "AMINA2026"
     assert not Vote.objects.exists()
     assert api.get(f"{PUBLIC}/ticket-orders/{order_number}/pdf/").status_code == 404
 
