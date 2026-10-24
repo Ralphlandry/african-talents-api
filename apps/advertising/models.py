@@ -19,7 +19,7 @@ class Advertisement(BaseModel):
     )
     placement = models.CharField(max_length=16, choices=PLACEMENT_CHOICES, default=BOTH, db_index=True)
     display_delay_seconds = models.PositiveIntegerField(default=10)
-    dismissal_cooldown_hours = models.PositiveIntegerField(default=24)
+    dismissal_cooldown_seconds = models.PositiveIntegerField(default=86400)
     button_label = models.CharField(max_length=80, default="Acheter maintenant")
     button_url = models.CharField(max_length=500, default="/billetterie")
     is_active = models.BooleanField(default=True, db_index=True)

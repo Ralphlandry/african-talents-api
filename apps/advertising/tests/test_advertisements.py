@@ -33,7 +33,7 @@ def test_advertisement_crud_requires_advertising_permissions(auth_client, make_r
             "image_id": str(image.pk),
             "placement": "both",
             "display_delay_seconds": 10,
-            "dismissal_cooldown_hours": 24,
+            "dismissal_cooldown_seconds": 86400,
             "button_label": "Acheter maintenant",
             "button_url": "/billetterie",
             "is_active": True,

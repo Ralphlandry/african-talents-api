@@ -16,13 +16,13 @@ class AdvertisementSerializer(serializers.ModelSerializer):
         write_only=True,
     )
     display_delay_seconds = serializers.IntegerField(default=10, min_value=0, max_value=86400)
-    dismissal_cooldown_hours = serializers.IntegerField(default=24, min_value=0, max_value=8760)
+    dismissal_cooldown_seconds = serializers.IntegerField(default=86400, min_value=0, max_value=31536000)
 
     class Meta:
         model = Advertisement
         fields = [
             "id", "title", "image", "image_id", "placement",
-            "display_delay_seconds", "dismissal_cooldown_hours", "button_label",
+            "display_delay_seconds", "dismissal_cooldown_seconds", "button_label",
             "button_url", "is_active", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
@@ -45,6 +45,6 @@ class PublicAdvertisementSerializer(serializers.ModelSerializer):
         model = Advertisement
         fields = [
             "id", "title", "image", "placement",
-            "display_delay_seconds", "dismissal_cooldown_hours",
+            "display_delay_seconds", "dismissal_cooldown_seconds",
             "button_label", "button_url",
         ]
