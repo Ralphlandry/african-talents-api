@@ -107,6 +107,29 @@ def test_manual_vote_adjustment_requires_reason(auth_client, make_role, make_use
 
 
 @pytest.mark.django_db
+def test_historical_votes_can_only_be_imported_once_per_candidate(
+    auth_client, make_role, make_user, make_competition, make_category, make_candidate
+):
+    user = make_user("historical-votes@example.com", make_role("Import historique", ["votes.adjust"]))
+    competition = make_competition()
+    candidate = make_candidate(competition, make_category(competition=competition))
+    client = auth_client(user)
+    payload = {
+        "candidate": str(candidate.pk),
+        "delta": 125,
+        "reason": "Import des votes de l’ancien site",
+    }
+
+    first_import = client.post(ADJUST, payload, format="json")
+    duplicate_import = client.post(ADJUST, payload, format="json")
+
+    assert first_import.status_code == 201
+    assert first_import.json()["quantity"] == 125
+    assert duplicate_import.status_code == 409
+    assert duplicate_import.json()["code"] == "HISTORICAL_VOTES_ALREADY_IMPORTED"
+
+
+@pytest.mark.django_db
 def test_ranking_reflects_ledger_not_a_denormalized_counter(auth_client, make_role, make_user, make_competition, make_category, make_candidate):
     from apps.voting.models import Vote
 

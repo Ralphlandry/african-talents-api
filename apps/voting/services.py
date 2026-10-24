@@ -5,9 +5,12 @@ from django.utils import timezone
 from apps.audit.constants import AuditAction as A
 from apps.audit.constants import AuditModule as M
 from apps.audit.services import record
+from apps.candidates.models import Candidate
 from apps.core.exceptions import ConflictError, UnprocessableError
 
 from .models import Vote, VoteOrder, VotePackage
+
+HISTORICAL_VOTE_IMPORT_REASON = "Import des votes de l’ancien site"
 
 # ---------------------------------------------------------------------------
 # Forfaits de vote (définis par l'admin — décision B : pas de prix unique codé en dur)
@@ -105,6 +108,18 @@ def credit_paid_order(order):
 
 @transaction.atomic
 def adjust_votes(actor, *, candidate, phase=None, delta, reason, request=None):
+    if reason == HISTORICAL_VOTE_IMPORT_REASON:
+        Candidate.objects.select_for_update().get(pk=candidate.pk)
+        if Vote.objects.filter(
+            candidate=candidate,
+            source=Vote.MANUAL_ADJUSTMENT,
+            reason=HISTORICAL_VOTE_IMPORT_REASON,
+        ).exists():
+            raise ConflictError(
+                "Les votes de l’ancien site ont déjà été importés pour ce candidat.",
+                code="HISTORICAL_VOTES_ALREADY_IMPORTED",
+            )
+
     vote = Vote.objects.create(
         candidate=candidate, phase=phase, quantity=delta, source=Vote.MANUAL_ADJUSTMENT,
         created_by=actor, reason=reason,
