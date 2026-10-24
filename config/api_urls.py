@@ -14,6 +14,7 @@ urlpatterns = [
     path("", include("apps.team.urls")),
     path("", include("apps.partners.urls")),
     path("", include("apps.media.urls")),
+    path("", include("apps.advertising.urls")),
     # --- jalon 3 : forfaits de vote, votes, paiements, finance (espace administrateur) ---
     path("", include("apps.voting.urls")),
     path("", include("apps.payments.urls")),

@@ -87,6 +87,10 @@ PERMISSION_GROUPS = [
         ("notifications.view", "Voir les notifications"),
         ("notifications.manage", "Gérer les notifications"),
     ]},
+    {"key": "advertising", "label": "Publicité", "permissions": [
+        ("advertising.view", "Voir les publicités"),
+        ("advertising.manage", "Créer et gérer les publicités"),
+    ]},
     {"key": "settings", "label": "Paramètres", "permissions": [
         ("settings.view", "Voir les paramètres"),
         ("settings.edit", "Modifier les paramètres"),
