@@ -15,8 +15,8 @@ class AdvertisementSerializer(serializers.ModelSerializer):
         allow_null=True,
         write_only=True,
     )
-    display_delay_seconds = serializers.IntegerField(min_value=0, max_value=86400)
-    dismissal_cooldown_hours = serializers.IntegerField(min_value=0, max_value=8760)
+    display_delay_seconds = serializers.IntegerField(default=10, min_value=0, max_value=86400)
+    dismissal_cooldown_hours = serializers.IntegerField(default=24, min_value=0, max_value=8760)
 
     class Meta:
         model = Advertisement
