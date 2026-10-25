@@ -64,6 +64,46 @@ def test_full_public_vote_flow(monkeypatch, api, make_competition, make_category
 
 
 @pytest.mark.django_db
+def test_failed_vote_order_status_poll_recognizes_provider_success(
+    monkeypatch, api, make_competition, make_category, make_candidate,
+    make_vote_package, make_vote_order,
+):
+    from apps.payments import services as payment_services
+    from apps.payments.models import Payment
+    from apps.voting.models import Vote, VoteOrder
+
+    competition = make_competition(votes_open=True)
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    package = make_vote_package(competition, quantity=10, price_xaf=1000)
+    order = make_vote_order(candidate, package, status=VoteOrder.FAILED)
+    Payment.objects.create(
+        vote_order=order,
+        reference=order.order_number,
+        environment="test",
+        amount_xaf=order.amount_xaf,
+        phone=order.customer_phone,
+        operator=order.operator,
+        status=Payment.FAILED,
+    )
+    monkeypatch.setattr(
+        payment_services,
+        "build_client_from_settings",
+        lambda: FakeGatewayClient(status_result={
+            "status": "SUCCESS",
+            "amount_xaf": order.amount_xaf,
+            "currency": "XAF",
+        }),
+    )
+
+    response = api.get(f"{PUBLIC}/vote-orders/{order.order_number}/")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == VoteOrder.PAID
+    assert Vote.objects.filter(vote_order=order, quantity=order.quantity).count() == 1
+
+
+@pytest.mark.django_db
 def test_card_vote_flow_returns_checkout_and_confirms_only_after_capture(
     monkeypatch, api, settings, make_competition, make_category, make_candidate, make_vote_package
 ):

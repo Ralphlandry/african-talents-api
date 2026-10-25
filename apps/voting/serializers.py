@@ -42,6 +42,17 @@ class VoteAdjustSerializer(serializers.Serializer):
         return value
 
 
+class FailedPaymentCompensationSerializer(serializers.Serializer):
+    payment_reference = serializers.CharField(max_length=32, trim_whitespace=True)
+    reason = serializers.CharField(max_length=255, min_length=10, trim_whitespace=True)
+    verified_at_merchant = serializers.BooleanField()
+
+    def validate_verified_at_merchant(self, value):
+        if not value:
+            raise serializers.ValidationError("Confirmez la réussite du paiement dans le compte marchand.")
+        return value
+
+
 class VoteOrderCreateSerializer(serializers.Serializer):
     """
     Le client choisit un candidat et un FORFAIT (pas une quantité/un prix libres) : le

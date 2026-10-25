@@ -51,7 +51,7 @@ _ALLOWED_TRANSITIONS = {
     Payment.PENDING: {Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED, Payment.HOLD},
     Payment.HOLD: {Payment.SUCCESS, Payment.FAILED},
     Payment.SUCCESS: {Payment.REFUNDED},
-    Payment.FAILED: set(),
+    Payment.FAILED: {Payment.SUCCESS},
     Payment.CANCELLED: set(),
     Payment.EXPIRED: set(),
     Payment.REFUNDED: set(),
@@ -137,14 +137,23 @@ def initiate_payment(order, *, request=None):
                 idempotency_key=order.idempotency_key,
             )
     except PaymentGatewayError as exc:
-        _mark_initiation_failed(payment, order, str(exc), request=request)
+        if exc.code == "NETWORK_ERROR" or (exc.status_code is not None and exc.status_code >= 500):
+            logger.warning(
+                "Résultat d'initiation incertain pour %s; la commande reste en attente pour vérification.",
+                order.order_number,
+            )
+        else:
+            _mark_initiation_failed(payment, order, str(exc), request=request)
         raise ServiceUnavailableError(
             "Le paiement n'a pas pu être initié auprès du prestataire. Veuillez réessayer.",
             code="PAYMENT_INITIATION_FAILED",
         ) from exc
     except Exception as exc:  # config manquante, etc. — jamais laisser fuiter le détail au client
         logger.exception("Erreur inattendue à l'initiation du paiement %s", order.order_number)
-        _mark_initiation_failed(payment, order, str(exc), request=request)
+        logger.warning(
+            "Résultat d'initiation incertain pour %s; la commande reste en attente pour vérification.",
+            order.order_number,
+        )
         raise ServiceUnavailableError("Service de paiement indisponible pour le moment.", code="PAYMENT_SERVICE_DOWN") from exc
 
     with transaction.atomic():
@@ -199,7 +208,9 @@ def _mark_initiation_failed(payment, order, reason, *, request=None):
 
 
 @transaction.atomic
-def apply_status(payment, new_status, *, reason="", fees_xaf=None, net_amount_xaf=None, request=None):
+def apply_status(
+    payment, new_status, *, reason="", fees_xaf=None, net_amount_xaf=None, request=None, actor=None, vote_reason=""
+):
     if new_status == payment.status:
         return payment  # idempotent : rejouer le même statut ne fait rien
     allowed = _ALLOWED_TRANSITIONS.get(payment.status, set())
@@ -217,6 +228,8 @@ def apply_status(payment, new_status, *, reason="", fees_xaf=None, net_amount_xa
         payment.confirmed_at = timezone.now()
     if new_status == Payment.FAILED:
         payment.failure_reason = reason[:255]
+    elif new_status == Payment.SUCCESS:
+        payment.failure_reason = ""
     payment.save()
 
     order_status = _order_status_for(new_status)
@@ -229,15 +242,17 @@ def apply_status(payment, new_status, *, reason="", fees_xaf=None, net_amount_xa
         payment.ticket_order.save(update_fields=["status", "updated_at"])
 
     if new_status == Payment.SUCCESS and payment.vote_order_id:
-        credit_paid_order(payment.vote_order)
+        credit_paid_order(payment.vote_order, reason=vote_reason)
 
-    record(request=request, action=A.PAYMENT_STATUS_CHANGED, module=M.FINANCE, resource="payment",
+    record(request=request, actor=actor, action=A.PAYMENT_STATUS_CHANGED, module=M.FINANCE, resource="payment",
            resource_id=payment.pk, metadata={"reference": payment.reference, "status": new_status, "reason": reason})
     return payment
 
 
 def refresh_pending_payment(payment, *, request=None):
-    if payment.status != Payment.PENDING or not payment.provider_reference:
+    if payment.status not in (Payment.PENDING, Payment.FAILED):
+        return payment
+    if payment.provider == "hrskills_pay_card" and not payment.provider_reference:
         return payment
 
     if not cache.add(f"payment-status-sync:{payment.reference}", True, STATUS_SYNC_CACHE_SECONDS):
@@ -360,7 +375,7 @@ def _process_event(event, payload):
     event.payment = payment
     event.save(update_fields=["payment"])
 
-    if payment.is_terminal:
+    if payment.is_terminal and payment.status != Payment.FAILED:
         return  # sécurité supplémentaire : un événement tardif ne peut pas rouvrir un paiement terminé
 
     # Défense en profondeur : on ne fait jamais confiance au seul contenu du webhook,

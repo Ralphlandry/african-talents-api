@@ -11,7 +11,12 @@ from apps.core.permissions import RBACPermission
 from . import services
 from .filters import VoteFilter
 from .models import Vote, VotePackage
-from .serializers import VoteAdjustSerializer, VotePackageSerializer, VoteRecordSerializer
+from .serializers import (
+    FailedPaymentCompensationSerializer,
+    VoteAdjustSerializer,
+    VotePackageSerializer,
+    VoteRecordSerializer,
+)
 
 
 @extend_schema(tags=["vote-packages"])
@@ -75,6 +80,28 @@ class VoteAdjustView(APIView):
         serializer.is_valid(raise_exception=True)
         vote = services.adjust_votes(request.user, request=request, **serializer.validated_data)
         return Response(VoteRecordSerializer(vote).data, status=201)
+
+
+class FailedVotePaymentCompensationView(APIView):
+    permission_classes = [RBACPermission]
+    permission_map = {"POST": "votes.adjust"}
+
+    @extend_schema(
+        tags=["votes"],
+        request=FailedPaymentCompensationSerializer,
+        responses={201: VoteRecordSerializer, 200: VoteRecordSerializer},
+    )
+    def post(self, request):
+        serializer = FailedPaymentCompensationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        vote, created = services.compensate_failed_vote_payment(
+            request.user,
+            request=request,
+            payment_reference=data["payment_reference"],
+            reason=data["reason"],
+        )
+        return Response(VoteRecordSerializer(vote).data, status=201 if created else 200)
 
 
 def _current_competition():

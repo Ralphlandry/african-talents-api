@@ -2,6 +2,7 @@ import pytest
 
 PACKAGES = "/api/v1/vote-packages/"
 ADJUST = "/api/v1/votes/adjust/"
+COMPENSATE_FAILED_PAYMENT = "/api/v1/votes/compensate-failed-payment/"
 RANKINGS = "/api/v1/rankings/"
 
 
@@ -136,6 +137,109 @@ def test_manual_vote_adjustment_requires_reason(auth_client, make_role, make_use
 
     ok = client.post(ADJUST, {"candidate": str(candidate.pk), "delta": 25, "reason": "Correction erreur de saisie"}, format="json")
     assert ok.status_code == 201 and ok.json()["source"] == "MANUAL_ADJUSTMENT"
+
+
+@pytest.mark.django_db
+def test_failed_payment_compensation_credits_order_quantity_once(
+    auth_client, make_role, make_user, make_competition, make_category, make_candidate,
+    make_vote_package, make_vote_order, make_payment,
+):
+    from apps.payments.models import Payment
+    from apps.voting.models import Vote, VoteOrder
+
+    competition = make_competition()
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    package = make_vote_package(competition, quantity=25, price_xaf=2500)
+    order = make_vote_order(candidate, package, status=VoteOrder.FAILED)
+    payment = make_payment(order, status=Payment.FAILED)
+    user = make_user("vote-admin@example.com", make_role("Votes", ["votes.adjust"]))
+    client = auth_client(user)
+    payload = {
+        "payment_reference": payment.reference,
+        "reason": "Paiement confirmé chez le marchand",
+        "verified_at_merchant": True,
+    }
+
+    first = client.post(COMPENSATE_FAILED_PAYMENT, payload, format="json")
+    second = client.post(COMPENSATE_FAILED_PAYMENT, payload, format="json")
+
+    assert first.status_code == 201
+    assert first.json()["quantity"] == order.quantity
+    assert first.json()["candidate"] == str(candidate.pk)
+    assert second.status_code == 200
+    assert Vote.objects.filter(vote_order=order).count() == 1
+    vote = Vote.objects.get(vote_order=order)
+    assert vote.source == Vote.PAID
+    assert vote.reason == "Régularisation manuelle après vérification HR-Skills Pay : Paiement confirmé chez le marchand"
+    payment.refresh_from_db()
+    assert payment.status == Payment.SUCCESS
+
+
+@pytest.mark.django_db
+def test_failed_payment_compensation_rejects_non_failed_payment(
+    auth_client, make_role, make_user, make_competition, make_category, make_candidate,
+    make_vote_package, make_vote_order, make_payment,
+):
+    from apps.payments.models import Payment
+    from apps.voting.models import Vote
+
+    competition = make_competition()
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    package = make_vote_package(competition)
+    order = make_vote_order(candidate, package)
+    payment = make_payment(order, status=Payment.PENDING)
+    user = make_user("vote-admin@example.com", make_role("Votes", ["votes.adjust"]))
+
+    response = auth_client(user).post(
+        COMPENSATE_FAILED_PAYMENT,
+        {
+            "payment_reference": payment.reference,
+            "reason": "Paiement validé chez le marchand",
+            "verified_at_merchant": True,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "FAILED_VOTE_PAYMENT_NOT_FOUND"
+    assert not Vote.objects.filter(candidate=candidate).exists()
+
+
+@pytest.mark.django_db
+def test_failed_payment_compensation_requires_vote_adjust_permission(
+    auth_client, make_role, make_user,
+):
+    user = make_user("read-only@example.com", make_role("Lecture", []))
+    response = auth_client(user).post(
+        COMPENSATE_FAILED_PAYMENT,
+        {
+            "payment_reference": "AT-2026-000015-ABCDEF123456",
+            "reason": "Paiement confirmé au marchand",
+            "verified_at_merchant": True,
+        },
+        format="json",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_failed_payment_compensation_requires_merchant_confirmation(
+    auth_client, make_role, make_user,
+):
+    user = make_user("vote-admin@example.com", make_role("Votes", ["votes.adjust"]))
+    response = auth_client(user).post(
+        COMPENSATE_FAILED_PAYMENT,
+        {
+            "payment_reference": "AT-2026-000015-ABCDEF123456",
+            "reason": "Paiement à vérifier au compte marchand",
+            "verified_at_merchant": False,
+        },
+        format="json",
+    )
+    assert response.status_code == 422
+    assert "verified_at_merchant" in response.json()["errors"]
 
 
 @pytest.mark.django_db

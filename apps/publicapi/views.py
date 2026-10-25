@@ -253,7 +253,7 @@ class PublicVoteOrderStatusView(PublicReadOnlyMixin, RetrieveAPIView):
 
     def retrieve(self, request, *args, **kwargs):
         order = self.get_object()
-        if order.status == VoteOrder.PENDING:
+        if order.status in (VoteOrder.PENDING, VoteOrder.FAILED):
             try:
                 payment = order.payment
             except Payment.DoesNotExist:

@@ -159,7 +159,7 @@ def test_immediate_successful_payin_credits_order(monkeypatch, order):
 
 
 @pytest.mark.django_db
-def test_initiate_payment_gateway_failure_marks_order_and_payment_failed(monkeypatch, order):
+def test_initiate_payment_network_error_keeps_order_pending_for_reconciliation(monkeypatch, order):
     from apps.payments import services
 
     fake = FakeGatewayClient(raise_on_payin=PaymentGatewayError("indisponible", code="NETWORK_ERROR"))
@@ -170,9 +170,26 @@ def test_initiate_payment_gateway_failure_marks_order_and_payment_failed(monkeyp
 
     order.refresh_from_db()
     payment = Payment.objects.get(vote_order=order)
-    assert order.status == VoteOrder.FAILED
-    assert payment.status == Payment.FAILED
-    assert payment.failure_reason
+    assert order.status == VoteOrder.PENDING
+    assert payment.status == Payment.PENDING
+
+
+@pytest.mark.django_db
+def test_unexpected_initiation_error_does_not_mark_possible_charge_failed(monkeypatch, order):
+    from apps.payments import services
+
+    def fail_after_request_may_have_reached_provider():
+        raise RuntimeError("Réponse du prestataire indisponible")
+
+    monkeypatch.setattr(services, "build_client_from_settings", fail_after_request_may_have_reached_provider)
+
+    with pytest.raises(ServiceUnavailableError):
+        services.initiate_payment(order)
+
+    order.refresh_from_db()
+    payment = Payment.objects.get(vote_order=order)
+    assert order.status == VoteOrder.PENDING
+    assert payment.status == Payment.PENDING
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +249,28 @@ def test_card_status_is_verified_and_capture_credits_votes(monkeypatch, order, m
     assert order.status == VoteOrder.PAID
     assert fake.card_status_reference == "CARD-42"
     assert Vote.objects.get(vote_order=order).quantity == order.quantity
+
+
+@pytest.mark.django_db
+def test_failed_payment_can_be_reconciled_to_success_by_status_poll(monkeypatch, order, make_payment):
+    from apps.payments import services
+
+    payment = make_payment(order, status=Payment.FAILED)
+    fake = FakeGatewayClient(status_result={
+        "status": Payment.SUCCESS,
+        "amount_xaf": order.amount_xaf,
+        "currency": "XAF",
+    })
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+
+    services.refresh_pending_payment(payment)
+
+    payment.refresh_from_db()
+    order.refresh_from_db()
+    assert payment.status == Payment.SUCCESS
+    assert payment.failure_reason == ""
+    assert order.status == VoteOrder.PAID
+    assert Vote.objects.filter(vote_order=order).count() == 1
 
 
 @pytest.mark.django_db
@@ -394,7 +433,7 @@ def test_webhook_for_unknown_reference_is_logged_without_error(settings):
 
 
 @pytest.mark.django_db
-def test_terminal_payment_ignores_late_webhook(settings, monkeypatch, order, make_payment):
+def test_failed_payment_is_reconciled_to_success_by_late_webhook(settings, monkeypatch, order, make_payment):
     from apps.payments import services
 
     settings.HRSKILLS_WEBHOOK_SECRET = "whsec_test"
@@ -406,7 +445,10 @@ def test_terminal_payment_ignores_late_webhook(settings, monkeypatch, order, mak
     services.handle_webhook(body, sign(body, "whsec_test"))
 
     payment.refresh_from_db()
-    assert payment.status == Payment.FAILED  # un paiement déjà terminé ne repart jamais
+    order.refresh_from_db()
+    assert payment.status == Payment.SUCCESS
+    assert order.status == VoteOrder.PAID
+    assert Vote.objects.filter(vote_order=order).count() == 1
 
 
 # ---------------------------------------------------------------------------

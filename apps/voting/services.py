@@ -83,7 +83,7 @@ def create_order(*, candidate, vote_package, phone, operator, idempotency_key, r
 
 
 @transaction.atomic
-def credit_paid_order(order):
+def credit_paid_order(order, *, reason=""):
     """
     Crédite les votes d'une commande payée. Appelée UNIQUEMENT depuis la confirmation
     fiable d'un paiement (webhook re-vérifié), jamais depuis la simple création de la
@@ -93,7 +93,7 @@ def credit_paid_order(order):
         return order.vote  # déjà crédité (rejeu d'événement) — idempotent
     vote = Vote.objects.create(
         candidate=order.candidate, phase=order.phase, quantity=order.quantity,
-        source=Vote.PAID, vote_order=order,
+        source=Vote.PAID, vote_order=order, reason=reason,
     )
     return vote
 
@@ -113,6 +113,50 @@ def adjust_votes(actor, *, candidate, phase=None, delta, reason, request=None):
            resource="vote", resource_id=vote.pk,
            metadata={"candidate": candidate.code, "delta": delta, "reason": reason})
     return vote
+
+
+@transaction.atomic
+def compensate_failed_vote_payment(actor, *, payment_reference, reason, request=None):
+    from apps.payments.models import Payment
+    from apps.payments.services import apply_status
+
+    payment = (
+        Payment.objects.select_for_update()
+        .select_related("vote_order", "vote_order__candidate")
+        .filter(reference=payment_reference, vote_order__isnull=False)
+        .first()
+    )
+    if payment is None:
+        raise UnprocessableError(
+            "Aucun paiement de vote ne correspond à cette référence.",
+            code="FAILED_VOTE_PAYMENT_NOT_FOUND",
+        )
+
+    order = payment.vote_order
+    if payment.status == Payment.SUCCESS:
+        if hasattr(order, "vote"):
+            return order.vote, False
+        raise ConflictError(
+            "Le paiement est réussi mais les votes ne sont pas encore crédités.",
+            code="VOTE_ORDER_NOT_CREDITED",
+        )
+    if payment.status != Payment.FAILED:
+        raise UnprocessableError(
+            "Seul un paiement de vote échoué peut être régularisé.",
+            code="FAILED_VOTE_PAYMENT_NOT_FOUND",
+        )
+    if hasattr(order, "vote"):
+        raise ConflictError("Cette commande possède déjà des votes crédités.", code="VOTE_ORDER_ALREADY_CREDITED")
+
+    apply_status(
+        payment,
+        Payment.SUCCESS,
+        reason=f"Régularisation admin après confirmation HR-Skills Pay : {reason}",
+        request=request,
+        actor=actor,
+        vote_reason=f"Régularisation manuelle après vérification HR-Skills Pay : {reason}",
+    )
+    return Vote.objects.get(vote_order=order), True
 
 
 # ---------------------------------------------------------------------------
