@@ -26,6 +26,10 @@ Vérifications rapides :
 - `GET http://localhost:8000/api/v1/health/` → `{"status": "ok"}`
 - `http://localhost:8000/api/docs/` → documentation Swagger (activée par défaut en dev)
 - `POST http://localhost:8000/api/v1/auth/login/` avec l'email/mot de passe du superuser créé
+- `POST /api/v1/auth/password-reset/` pour demander un lien temporaire, puis
+  `POST /api/v1/auth/password-reset/confirm/` avec `uid`, `token` et `new_password`.
+  En production, configurez le serveur SMTP et `ADMIN_FRONTEND_URL` dans `.env` ; en
+  développement, les e-mails s'affichent dans les logs de l'API.
 
 ## Tests
 

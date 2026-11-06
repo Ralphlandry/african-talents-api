@@ -1,4 +1,7 @@
+from urllib.parse import parse_qs, urlparse
+
 import pytest
+from django.core import mail
 
 from apps.accounts.models import User
 from apps.audit.models import AuditLog
@@ -8,6 +11,8 @@ REFRESH = "/api/v1/auth/refresh/"
 LOGOUT = "/api/v1/auth/logout/"
 ME = "/api/v1/auth/me/"
 CHANGE = "/api/v1/auth/change-password/"
+PASSWORD_RESET = "/api/v1/auth/password-reset/"
+PASSWORD_RESET_CONFIRM = "/api/v1/auth/password-reset/confirm/"
 
 
 @pytest.mark.django_db
@@ -111,3 +116,72 @@ def test_change_password(auth_client, super_admin, password, api):
     assert ok.status_code == 200 and ok.json()["must_change_password"] is False
     assert api.post(LOGIN, {"email": super_admin.email, "password": password}, format="json").status_code == 401
     assert api.post(LOGIN, {"email": super_admin.email, "password": "An0ther-Str0ng-Pass!"}, format="json").status_code == 200
+
+
+@pytest.mark.django_db
+def test_password_reset_request_does_not_disclose_unknown_accounts(api, super_admin):
+    unknown = api.post(PASSWORD_RESET, {"email": "ghost@example.com"}, format="json")
+    known = api.post(PASSWORD_RESET, {"email": super_admin.email}, format="json")
+
+    assert unknown.status_code == known.status_code == 200
+    assert unknown.json() == known.json()
+    assert len(mail.outbox) == 1
+    assert mail.outbox[0].to == [super_admin.email]
+    assert "reset-password?" in mail.outbox[0].body
+
+
+@pytest.mark.django_db
+def test_password_reset_link_changes_password_once_and_revokes_sessions(api, super_admin, password):
+    login = api.post(LOGIN, {"email": super_admin.email, "password": password}, format="json")
+    assert login.status_code == 200
+    super_admin.must_change_password = True
+    super_admin.failed_login_count = 3
+    super_admin.save(update_fields=["must_change_password", "failed_login_count"])
+
+    api.post(PASSWORD_RESET, {"email": super_admin.email}, format="json")
+    reset_url = next(line for line in mail.outbox[0].body.splitlines() if line.startswith("http"))
+    params = parse_qs(urlparse(reset_url).query)
+    reset_data = {
+        "uid": params["uid"][0],
+        "token": params["token"][0],
+        "new_password": "An0ther-Str0ng-Pass!",
+    }
+
+    weak = api.post(PASSWORD_RESET_CONFIRM, {**reset_data, "new_password": "12345678"}, format="json")
+    assert weak.status_code == 422
+
+    response = api.post(PASSWORD_RESET_CONFIRM, reset_data, format="json")
+    assert response.status_code == 200
+    assert api.post(REFRESH).status_code == 401
+    super_admin.refresh_from_db()
+    assert super_admin.check_password(reset_data["new_password"])
+    assert not super_admin.must_change_password
+    assert super_admin.failed_login_count == 0
+    assert api.post(LOGIN, {"email": super_admin.email, "password": password}, format="json").status_code == 401
+    assert api.post(LOGIN, {"email": super_admin.email, "password": reset_data["new_password"]}, format="json").status_code == 200
+
+    reused = api.post(PASSWORD_RESET_CONFIRM, reset_data, format="json")
+    assert reused.status_code == 422
+    assert AuditLog.objects.filter(action="ADMIN_PASSWORD_RESET", actor=super_admin).exists()
+
+
+@pytest.mark.django_db
+def test_password_reset_rejects_invalid_or_inactive_accounts(api, make_user, super_role):
+    inactive = make_user("inactive@example.com", super_role, is_active=False)
+    response = api.post(PASSWORD_RESET, {"email": inactive.email}, format="json")
+    assert response.status_code == 200
+    assert not mail.outbox
+
+    invalid = api.post(
+        PASSWORD_RESET_CONFIRM,
+        {"uid": "invalid", "token": "invalid", "new_password": "An0ther-Str0ng-Pass!"},
+        format="json",
+    )
+    assert invalid.status_code == 422
+
+    malformed_uuid = api.post(
+        PASSWORD_RESET_CONFIRM,
+        {"uid": "Zm9v", "token": "invalid", "new_password": "An0ther-Str0ng-Pass!"},
+        format="json",
+    )
+    assert malformed_uuid.status_code == 422

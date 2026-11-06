@@ -9,6 +9,10 @@ class RefreshRateThrottle(AnonRateThrottle):
     scope = "refresh"
 
 
+class PasswordResetRateThrottle(AnonRateThrottle):
+    scope = "password_reset"
+
+
 class VoteOrderRateThrottle(AnonRateThrottle):
     """Limite la création de commandes de vote par IP (voir aussi apps/publicapi/views.py)."""
 

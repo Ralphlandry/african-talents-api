@@ -1,5 +1,8 @@
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
 
 from .models import Permission, Role, User
@@ -44,6 +47,33 @@ class ChangePasswordSerializer(serializers.Serializer):
             validate_password(attrs["new_password"], user)
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"new_password": list(exc.messages)})
+        return attrs
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+    def validate(self, attrs):
+        try:
+            user_id = force_str(urlsafe_base64_decode(attrs["uid"]))
+            user = User.objects.get(pk=user_id)
+        except (TypeError, ValueError, OverflowError, DjangoValidationError, User.DoesNotExist):
+            user = None
+
+        if not user or not user.is_active or not default_token_generator.check_token(user, attrs["token"]):
+            raise serializers.ValidationError({"token": ["Ce lien de réinitialisation est invalide ou expiré."]})
+
+        try:
+            validate_password(attrs["new_password"], user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": list(exc.messages)})
+        attrs["user"] = user
         return attrs
 
 

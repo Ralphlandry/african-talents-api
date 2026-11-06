@@ -1,7 +1,7 @@
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F401,F403
-from .base import ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, DEBUG, SECRET_KEY, env_bool
+from .base import ADMIN_FRONTEND_URL, ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, DEBUG, SECRET_KEY, env_bool
 
 if DEBUG:
     raise ImproperlyConfigured("DEBUG doit être False en production.")
@@ -11,6 +11,8 @@ if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
     raise ImproperlyConfigured("ALLOWED_HOSTS doit lister explicitement les domaines en production.")
 if not CORS_ALLOWED_ORIGINS or "*" in CORS_ALLOWED_ORIGINS:
     raise ImproperlyConfigured("CORS_ALLOWED_ORIGINS doit lister explicitement les origines en production.")
+if not ADMIN_FRONTEND_URL.startswith("https://"):
+    raise ImproperlyConfigured("ADMIN_FRONTEND_URL doit être une URL HTTPS valide en production.")
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", True)

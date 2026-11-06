@@ -1,5 +1,12 @@
+from urllib.parse import urlencode
+
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.db import transaction
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -19,11 +26,17 @@ from apps.core.exceptions import (
     DomainError,
     InvalidCredentialsError,
 )
-from apps.core.throttles import LoginRateThrottle, RefreshRateThrottle
+from apps.core.throttles import LoginRateThrottle, PasswordResetRateThrottle, RefreshRateThrottle
 
 from . import services
 from .models import User
-from .serializers import ChangePasswordSerializer, LoginSerializer, MeSerializer
+from .serializers import (
+    ChangePasswordSerializer,
+    LoginSerializer,
+    MeSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+)
 
 
 def set_refresh_cookie(response, token):
@@ -190,3 +203,72 @@ class ChangePasswordView(APIView):
         response = Response(session_payload(user, refresh))
         set_refresh_cookie(response, refresh)
         return response
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [PasswordResetRateThrottle]
+
+    @extend_schema(request=PasswordResetRequestSerializer, responses=OpenApiTypes.OBJECT, auth=[])
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].strip().lower()
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+
+        if user:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            query = urlencode({"uid": uid, "token": token})
+            reset_url = f"{settings.ADMIN_FRONTEND_URL}/reset-password?{query}"
+            send_mail(
+                "Réinitialisation de votre mot de passe African Talents",
+                (
+                    f"Bonjour {user.full_name},\n\n"
+                    "Une demande de réinitialisation du mot de passe de votre compte administrateur "
+                    "African Talents a été effectuée.\n\n"
+                    f"Pour choisir un nouveau mot de passe, ouvrez ce lien :\n{reset_url}\n\n"
+                    "Ce lien est valable pendant une durée limitée et ne peut être utilisé qu'une fois. "
+                    "Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail."
+                ),
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+
+        return Response({
+            "message": "Si cette adresse correspond à un compte actif, un lien de réinitialisation va être envoyé.",
+        })
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [PasswordResetRateThrottle]
+
+    @extend_schema(request=PasswordResetConfirmSerializer, responses=OpenApiTypes.OBJECT, auth=[])
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+
+        with transaction.atomic():
+            user.set_password(serializer.validated_data["new_password"])
+            user.must_change_password = False
+            user.failed_login_count = 0
+            user.locked_until = None
+            user.save(update_fields=[
+                "password", "must_change_password", "failed_login_count", "locked_until", "updated_at",
+            ])
+            services.revoke_all_sessions(user)
+
+        record(
+            request=request,
+            actor=user,
+            action=A.ADMIN_PASSWORD_RESET,
+            module=M.AUTH,
+            resource="user",
+            resource_id=user.pk,
+        )
+        return Response({"message": "Votre mot de passe a été réinitialisé. Vous pouvez vous connecter."})

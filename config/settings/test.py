@@ -21,6 +21,6 @@ REST_FRAMEWORK = {
     **REST_FRAMEWORK,
     "DEFAULT_THROTTLE_RATES": {
         "anon": "100000/min", "user": "100000/min", "login": "100000/min", "refresh": "100000/min",
-        "webhook": "100000/min", "vote_order": "100000/min",
+        "password_reset": "100000/min", "webhook": "100000/min", "vote_order": "100000/min",
     },
 }

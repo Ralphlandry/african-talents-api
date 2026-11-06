@@ -168,11 +168,25 @@ REST_FRAMEWORK = {
         "user": "1000/min",
         "login": "10/min",
         "refresh": "60/min",
+        "password_reset": "5/hour",
         "webhook": "300/min",
         "vote_order": "20/min",
     },
     "NUM_PROXIES": NUM_PROXIES,
 }
+
+# --------------------------------------------------------------------------
+# E-mail d'authentification
+# --------------------------------------------------------------------------
+EMAIL_BACKEND = env("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = env("EMAIL_HOST", "localhost")
+EMAIL_PORT = env_int("EMAIL_PORT", 25)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", False)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "noreply@africantalents.africa")
+ADMIN_FRONTEND_URL = env("ADMIN_FRONTEND_URL", "http://localhost:5174").rstrip("/")
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "African Talents API",

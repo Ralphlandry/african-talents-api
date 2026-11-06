@@ -49,6 +49,10 @@ au minimum :
 - `CORS_ALLOWED_ORIGINS` et `CSRF_TRUSTED_ORIGINS` avec
   `https://african-talents.socoprocaap.com` et
   `https://admin-african-talents.socoprocaap.com` ;
+- `ADMIN_FRONTEND_URL=https://admin-african-talents.socoprocaap.com` et les paramètres
+  `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`,
+  `EMAIL_USE_SSL` et `DEFAULT_FROM_EMAIL` du serveur SMTP utilisé pour envoyer les liens de
+  réinitialisation des mots de passe (`ADMIN_FRONTEND_URL` doit être en HTTPS) ;
 - `POSTGRES_PASSWORD` avec un mot de passe fort et unique ;
 - les clés de paiement et URLs de retour/webhook correspondant à l'environnement choisi.
 
