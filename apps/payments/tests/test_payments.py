@@ -253,6 +253,42 @@ def test_card_status_is_verified_and_capture_credits_votes(monkeypatch, order, m
 
 
 @pytest.mark.django_db
+def test_expired_card_payment_can_be_reconciled_to_verified_success(monkeypatch, order, make_payment):
+    from apps.payments import services
+
+    payment = make_payment(
+        order, status=Payment.EXPIRED, provider="hrskills_pay_card", provider_reference="CARD-EXPIRED-1",
+    )
+    fake = FakeGatewayClient(card_status_result={
+        "status": "CAPTURED", "amount_xaf": order.amount_xaf, "currency": "XAF",
+    })
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+
+    services.refresh_pending_payment(payment)
+
+    payment.refresh_from_db()
+    order.refresh_from_db()
+    assert payment.status == Payment.SUCCESS
+    assert order.status == VoteOrder.PAID
+    assert Vote.objects.get(vote_order=order).quantity == order.quantity
+
+
+@pytest.mark.django_db
+def test_stale_card_payment_is_not_expired_without_provider_confirmation(monkeypatch, order, make_payment):
+    from apps.payments import services
+
+    payment = make_payment(order, status=Payment.PENDING, provider="hrskills_pay_card", provider_reference="CARD-OLD")
+    Payment.objects.filter(pk=payment.pk).update(initiated_at=timezone.now() - timezone.timedelta(hours=1))
+    fake = FakeGatewayClient(card_status_result={"status": "PENDING"})
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+
+    assert services.expire_stale_pending_payments() == 0
+
+    payment.refresh_from_db()
+    assert payment.status == Payment.PENDING
+
+
+@pytest.mark.django_db
 def test_admin_can_refresh_pending_card_payment_status(api, super_admin, monkeypatch, order, make_payment):
     from apps.payments import services
 
@@ -268,6 +304,27 @@ def test_admin_can_refresh_pending_card_payment_status(api, super_admin, monkeyp
     assert response.status_code == 200
     assert response.json()["status"] == Payment.SUCCESS
     assert fake.card_status_reference == "CARD-44"
+    order.refresh_from_db()
+    assert order.status == VoteOrder.PAID
+
+
+@pytest.mark.django_db
+def test_admin_can_refresh_expired_card_payment_status(api, super_admin, monkeypatch, order, make_payment):
+    from apps.payments import services
+
+    payment = make_payment(
+        order, status=Payment.EXPIRED, provider="hrskills_pay_card", provider_reference="CARD-EXPIRED-2",
+    )
+    fake = FakeGatewayClient(card_status_result={
+        "status": "CAPTURED", "amount_xaf": order.amount_xaf, "currency": "XAF",
+    })
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+    api.credentials(HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(super_admin)}")
+
+    response = api.post(f"/api/v1/payments/{payment.pk}/refresh/", {}, format="json")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == Payment.SUCCESS
     order.refresh_from_db()
     assert order.status == VoteOrder.PAID
 

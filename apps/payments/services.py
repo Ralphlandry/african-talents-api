@@ -53,7 +53,7 @@ _ALLOWED_TRANSITIONS = {
     Payment.SUCCESS: {Payment.REFUNDED},
     Payment.FAILED: {Payment.SUCCESS},
     Payment.CANCELLED: set(),
-    Payment.EXPIRED: set(),
+    Payment.EXPIRED: {Payment.SUCCESS},
     Payment.REFUNDED: set(),
 }
 
@@ -250,7 +250,7 @@ def apply_status(
 
 
 def refresh_pending_payment(payment, *, request=None, raise_errors=False):
-    if payment.status not in (Payment.PENDING, Payment.FAILED):
+    if payment.status not in (Payment.PENDING, Payment.FAILED, Payment.EXPIRED):
         return payment
     if payment.provider == "hrskills_pay_card" and not payment.provider_reference:
         return payment
@@ -397,7 +397,7 @@ def _process_event(event, payload):
     event.payment = payment
     event.save(update_fields=["payment"])
 
-    if payment.is_terminal and payment.status != Payment.FAILED:
+    if payment.is_terminal and payment.status not in (Payment.FAILED, Payment.EXPIRED):
         return  # sécurité supplémentaire : un événement tardif ne peut pas rouvrir un paiement terminé
 
     # Défense en profondeur : on ne fait jamais confiance au seul contenu du webhook,
@@ -457,6 +457,14 @@ def expire_stale_pending_payments():
     )
     count = 0
     for payment in stale:
+        if payment.provider == "hrskills_pay_card":
+            refresh_pending_payment(payment)
+            payment.refresh_from_db()
+            if payment.status == Payment.PENDING:
+                continue
+            if payment.status == Payment.EXPIRED:
+                count += 1
+            continue
         apply_status(payment, Payment.EXPIRED, reason="Délai d'attente dépassé (webhook jamais reçu).")
         count += 1
     if count:
