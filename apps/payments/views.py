@@ -57,11 +57,21 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
     )
     serializer_class = PaymentSerializer
     permission_classes = [RBACPermission]
-    permission_map = {"list": "payments.view", "retrieve": "payments.view", "refund": "payments.refund"}
+    permission_map = {
+        "list": "payments.view",
+        "retrieve": "payments.view",
+        "refresh": "payments.view",
+        "refund": "payments.refund",
+    }
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["status", "operator", "environment"]
     search_fields = ["reference", "provider_reference"]
     ordering = ["-initiated_at"]
+
+    @action(detail=True, methods=["post"])
+    def refresh(self, request, pk=None):
+        payment = services.refresh_pending_payment(self.get_object(), request=request, raise_errors=True)
+        return Response(self.get_serializer(payment).data)
 
     @action(detail=True, methods=["post"])
     def refund(self, request, pk=None):

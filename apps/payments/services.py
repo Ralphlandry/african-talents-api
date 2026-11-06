@@ -249,13 +249,15 @@ def apply_status(
     return payment
 
 
-def refresh_pending_payment(payment, *, request=None):
+def refresh_pending_payment(payment, *, request=None, raise_errors=False):
     if payment.status not in (Payment.PENDING, Payment.FAILED):
         return payment
     if payment.provider == "hrskills_pay_card" and not payment.provider_reference:
         return payment
 
     if not cache.add(f"payment-status-sync:{payment.reference}", True, STATUS_SYNC_CACHE_SECONDS):
+        if raise_errors:
+            raise ConflictError("Une vérification de ce paiement est déjà en cours. Réessayez dans quelques secondes.")
         return payment
 
     try:
@@ -268,9 +270,19 @@ def refresh_pending_payment(payment, *, request=None):
             status = (verified.get("status") or "").upper()
     except PaymentGatewayError as exc:
         logger.warning("Impossible de synchroniser le paiement %s auprès de HR-Skills Pay : %s", payment.reference, exc)
+        if raise_errors:
+            raise ServiceUnavailableError(
+                "Le statut du paiement n'a pas pu être vérifié auprès du prestataire.",
+                code="PAYMENT_STATUS_UNAVAILABLE",
+            ) from exc
         return payment
 
-    if status not in (Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED):
+    if status not in (Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED, Payment.HOLD):
+        if raise_errors:
+            raise ServiceUnavailableError(
+                "Le prestataire a renvoyé un statut de paiement absent ou non reconnu. Réessayez plus tard.",
+                code="PAYMENT_STATUS_UNKNOWN",
+            )
         return payment
 
     amount_xaf = verified.get("amount_xaf")
@@ -279,6 +291,11 @@ def refresh_pending_payment(payment, *, request=None):
             "Écart de montant pendant la synchronisation de %s : attendu %s, reçu %s — paiement non crédité.",
             payment.reference, payment.amount_xaf, amount_xaf,
         )
+        if raise_errors:
+            raise ConflictError(
+                "Le montant confirmé par le prestataire ne correspond pas à celui de la commande. Aucun vote n'a été crédité.",
+                code="PAYMENT_AMOUNT_MISMATCH",
+            )
         return payment
     verified_currency = verified.get("currency")
     if verified_currency and verified_currency.upper() != payment.currency:
@@ -286,6 +303,11 @@ def refresh_pending_payment(payment, *, request=None):
             "Écart de devise pendant la synchronisation de %s : attendu %s, reçu %s — paiement non crédité.",
             payment.reference, payment.currency, verified_currency,
         )
+        if raise_errors:
+            raise ConflictError(
+                "La devise confirmée par le prestataire ne correspond pas à celle de la commande. Aucun vote n'a été crédité.",
+                code="PAYMENT_CURRENCY_MISMATCH",
+            )
         return payment
 
     return apply_status(
