@@ -46,20 +46,21 @@ def _provider_failure_reason(verified, fallback):
     return fallback
 
 
-# Transitions autorisées (machine à états monotone — un état terminal ne redevient jamais actif).
+# Reconciliation may reopen an expired payment when the provider confirms it is still pending.
 _ALLOWED_TRANSITIONS = {
     Payment.PENDING: {Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED, Payment.HOLD},
     Payment.HOLD: {Payment.SUCCESS, Payment.FAILED},
     Payment.SUCCESS: {Payment.REFUNDED},
     Payment.FAILED: {Payment.SUCCESS},
     Payment.CANCELLED: set(),
-    Payment.EXPIRED: {Payment.SUCCESS},
+    Payment.EXPIRED: {Payment.PENDING, Payment.SUCCESS},
     Payment.REFUNDED: set(),
 }
 
 
 def _order_status_for(payment_status):
     return {
+        Payment.PENDING: VoteOrder.PENDING,
         Payment.SUCCESS: VoteOrder.PAID,
         Payment.FAILED: VoteOrder.FAILED,
         Payment.CANCELLED: VoteOrder.CANCELLED,
@@ -69,6 +70,7 @@ def _order_status_for(payment_status):
 
 def _ticket_status_for(payment_status):
     return {
+        Payment.PENDING: TicketOrder.PENDING,
         Payment.SUCCESS: TicketOrder.PAID,
         Payment.FAILED: TicketOrder.FAILED,
         Payment.CANCELLED: TicketOrder.CANCELLED,
@@ -226,9 +228,11 @@ def apply_status(
         payment.net_amount_xaf = net_amount_xaf
     if new_status in Payment.TERMINAL_STATUSES:
         payment.confirmed_at = timezone.now()
+    else:
+        payment.confirmed_at = None
     if new_status == Payment.FAILED:
         payment.failure_reason = reason[:255]
-    elif new_status == Payment.SUCCESS:
+    elif new_status in (Payment.PENDING, Payment.SUCCESS):
         payment.failure_reason = ""
     payment.save()
 
@@ -277,7 +281,9 @@ def refresh_pending_payment(payment, *, request=None, raise_errors=False):
             ) from exc
         return payment
 
-    if status not in (Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED, Payment.HOLD):
+    if status not in (
+        Payment.PENDING, Payment.SUCCESS, Payment.FAILED, Payment.CANCELLED, Payment.EXPIRED, Payment.HOLD,
+    ):
         if raise_errors:
             raise ServiceUnavailableError(
                 "Le prestataire a renvoyé un statut de paiement absent ou non reconnu. Réessayez plus tard.",

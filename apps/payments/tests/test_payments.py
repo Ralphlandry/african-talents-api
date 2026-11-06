@@ -274,6 +274,32 @@ def test_expired_card_payment_can_be_reconciled_to_verified_success(monkeypatch,
 
 
 @pytest.mark.django_db
+def test_expired_card_payment_reopens_when_provider_still_reports_pending(monkeypatch, order, make_payment):
+    from apps.payments import services
+
+    payment = make_payment(
+        order,
+        status=Payment.EXPIRED,
+        provider="hrskills_pay_card",
+        provider_reference="CARD-STILL-PENDING",
+        confirmed_at=timezone.now(),
+    )
+    fake = FakeGatewayClient(card_status_result={
+        "status": "PENDING", "amount_xaf": order.amount_xaf, "currency": "XAF",
+    })
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+
+    services.refresh_pending_payment(payment)
+
+    payment.refresh_from_db()
+    order.refresh_from_db()
+    assert payment.status == Payment.PENDING
+    assert payment.confirmed_at is None
+    assert order.status == VoteOrder.PENDING
+    assert not Vote.objects.filter(vote_order=order).exists()
+
+
+@pytest.mark.django_db
 def test_stale_card_payment_is_not_expired_without_provider_confirmation(monkeypatch, order, make_payment):
     from apps.payments import services
 
@@ -327,6 +353,28 @@ def test_admin_can_refresh_expired_card_payment_status(api, super_admin, monkeyp
     assert response.json()["status"] == Payment.SUCCESS
     order.refresh_from_db()
     assert order.status == VoteOrder.PAID
+
+
+@pytest.mark.django_db
+def test_admin_refresh_reopens_expired_card_if_provider_reports_pending(api, super_admin, monkeypatch, order, make_payment):
+    from apps.payments import services
+
+    payment = make_payment(
+        order, status=Payment.EXPIRED, provider="hrskills_pay_card", provider_reference="CARD-STILL-PENDING-2",
+    )
+    fake = FakeGatewayClient(card_status_result={
+        "status": "PENDING", "amount_xaf": order.amount_xaf, "currency": "XAF",
+    })
+    monkeypatch.setattr(services, "build_client_from_settings", lambda: fake)
+    api.credentials(HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(super_admin)}")
+
+    response = api.post(f"/api/v1/payments/{payment.pk}/refresh/", {}, format="json")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == Payment.PENDING
+    order.refresh_from_db()
+    assert order.status == VoteOrder.PENDING
+    assert not Vote.objects.filter(vote_order=order).exists()
 
 
 @pytest.mark.django_db
