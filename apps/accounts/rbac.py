@@ -27,6 +27,10 @@ def get_super_admin_role():
             "color": "gold",
         },
     )
+    if not role.is_system or not role.is_super_admin:
+        role.is_system = True
+        role.is_super_admin = True
+        role.save(update_fields=["is_system", "is_super_admin", "updated_at"])
     return role
 
 

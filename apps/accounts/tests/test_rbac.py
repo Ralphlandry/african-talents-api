@@ -8,6 +8,21 @@ ROLES = "/api/v1/roles/"
 
 
 @pytest.mark.django_db
+def test_rbac_sync_restores_super_admin_role_flags(super_admin):
+    from apps.accounts.rbac import get_super_admin_role
+
+    role = super_admin.role
+    role.is_system = False
+    role.is_super_admin = False
+    role.save(update_fields=["is_system", "is_super_admin"])
+
+    restored_role = get_super_admin_role()
+
+    assert restored_role.is_system is True
+    assert restored_role.is_super_admin is True
+
+
+@pytest.mark.django_db
 def test_permission_is_enforced_per_action(auth_client, make_role, make_user):
     viewer = make_user("v@example.com", make_role("Lecteur", ["admins.view"]))
     nobody = make_user("n@example.com", make_role("Vide", ["news.view"]))

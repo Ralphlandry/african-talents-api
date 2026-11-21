@@ -176,6 +176,27 @@ def test_manual_vote_reversal_only_removes_available_manual_votes(
 
 
 @pytest.mark.django_db
+def test_super_admin_can_reverse_manual_votes(
+    auth_client, super_admin, make_competition, make_category, make_candidate,
+):
+    from apps.voting.models import Vote
+
+    competition = make_competition()
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    Vote.objects.create(candidate=candidate, quantity=8, source=Vote.MANUAL_ADJUSTMENT)
+
+    response = auth_client(super_admin).post(
+        REVERSE_MANUAL_ADJUSTMENT,
+        {"candidate": str(candidate.pk), "quantity": 3, "reason": "Correction saisie en trop"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["quantity"] == -3
+
+
+@pytest.mark.django_db
 def test_failed_payment_compensation_credits_order_quantity_once(
     auth_client, make_role, make_user, make_competition, make_category, make_candidate,
     make_vote_package, make_vote_order, make_payment,
