@@ -116,6 +116,30 @@ def adjust_votes(actor, *, candidate, phase=None, delta, reason, request=None):
 
 
 @transaction.atomic
+def reverse_manual_votes(actor, *, candidate, quantity, reason, request=None):
+    from apps.candidates.models import Candidate
+
+    candidate = Candidate.objects.select_for_update().get(pk=candidate.pk)
+    manual_vote_balance = Vote.objects.filter(
+        candidate=candidate,
+        source=Vote.MANUAL_ADJUSTMENT,
+    ).aggregate(total=Sum("quantity"))["total"] or 0
+    if quantity > manual_vote_balance:
+        raise UnprocessableError(
+            f"Vous ne pouvez retirer que {max(manual_vote_balance, 0)} vote(s) manuel(s) net(s) pour ce candidat.",
+            code="MANUAL_VOTE_REVERSAL_EXCEEDS_BALANCE",
+        )
+
+    return adjust_votes(
+        actor,
+        candidate=candidate,
+        delta=-quantity,
+        reason=f"Retrait de votes manuels : {reason}",
+        request=request,
+    )
+
+
+@transaction.atomic
 def compensate_failed_vote_payment(actor, *, payment_reference, reason, request=None):
     from apps.payments.models import Payment
     from apps.payments.services import apply_status

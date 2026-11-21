@@ -3,6 +3,7 @@ from rest_framework.routers import SimpleRouter
 
 from .views import (
     FailedVotePaymentCompensationView,
+    ManualVoteReversalView,
     RankingView,
     VoteAdjustView,
     VoteListView,
@@ -18,6 +19,7 @@ router.register("votes", VoteListView, basename="vote")
 urlpatterns = [
     # ordre important : ces routes explicites doivent être évaluées avant "votes/<pk>/" du router
     path("votes/adjust/", VoteAdjustView.as_view(), name="votes-adjust"),
+    path("votes/reverse-manual-adjustment/", ManualVoteReversalView.as_view(), name="votes-reverse-manual-adjustment"),
     path(
         "votes/compensate-failed-payment/",
         FailedVotePaymentCompensationView.as_view(),

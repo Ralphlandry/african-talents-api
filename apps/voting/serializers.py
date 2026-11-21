@@ -42,6 +42,12 @@ class VoteAdjustSerializer(serializers.Serializer):
         return value
 
 
+class ManualVoteReversalSerializer(serializers.Serializer):
+    candidate = serializers.PrimaryKeyRelatedField(queryset=Candidate.objects.all())
+    quantity = serializers.IntegerField(min_value=1)
+    reason = serializers.CharField(max_length=255, min_length=5, trim_whitespace=True)
+
+
 class FailedPaymentCompensationSerializer(serializers.Serializer):
     payment_reference = serializers.CharField(max_length=32, trim_whitespace=True)
     reason = serializers.CharField(max_length=255, min_length=10, trim_whitespace=True)

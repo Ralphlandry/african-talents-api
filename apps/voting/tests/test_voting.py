@@ -2,6 +2,7 @@ import pytest
 
 PACKAGES = "/api/v1/vote-packages/"
 ADJUST = "/api/v1/votes/adjust/"
+REVERSE_MANUAL_ADJUSTMENT = "/api/v1/votes/reverse-manual-adjustment/"
 COMPENSATE_FAILED_PAYMENT = "/api/v1/votes/compensate-failed-payment/"
 RANKINGS = "/api/v1/rankings/"
 
@@ -137,6 +138,41 @@ def test_manual_vote_adjustment_requires_reason(auth_client, make_role, make_use
 
     ok = client.post(ADJUST, {"candidate": str(candidate.pk), "delta": 25, "reason": "Correction erreur de saisie"}, format="json")
     assert ok.status_code == 201 and ok.json()["source"] == "MANUAL_ADJUSTMENT"
+
+
+@pytest.mark.django_db
+def test_manual_vote_reversal_only_removes_available_manual_votes(
+    auth_client, make_role, make_user, make_competition, make_category, make_candidate,
+):
+    from django.db.models import Sum
+    from apps.voting.models import Vote
+
+    competition = make_competition()
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    Vote.objects.create(candidate=candidate, quantity=20, source=Vote.PAID)
+    Vote.objects.create(candidate=candidate, quantity=12, source=Vote.MANUAL_ADJUSTMENT, reason="Saisie manuelle")
+    user = make_user("vote-admin@example.com", make_role("Votes", ["votes.adjust"]))
+    client = auth_client(user)
+
+    too_many = client.post(
+        REVERSE_MANUAL_ADJUSTMENT,
+        {"candidate": str(candidate.pk), "quantity": 13, "reason": "Correction saisie en trop"},
+        format="json",
+    )
+    assert too_many.status_code == 422
+    assert too_many.json()["code"] == "MANUAL_VOTE_REVERSAL_EXCEEDS_BALANCE"
+    assert Vote.objects.filter(candidate=candidate).aggregate(total=Sum("quantity"))["total"] == 32
+
+    response = client.post(
+        REVERSE_MANUAL_ADJUSTMENT,
+        {"candidate": str(candidate.pk), "quantity": 5, "reason": "Correction saisie en trop"},
+        format="json",
+    )
+    assert response.status_code == 201
+    assert response.json()["quantity"] == -5
+    assert response.json()["source"] == "MANUAL_ADJUSTMENT"
+    assert Vote.objects.filter(candidate=candidate).aggregate(total=Sum("quantity"))["total"] == 27
 
 
 @pytest.mark.django_db

@@ -13,6 +13,7 @@ from .filters import VoteFilter
 from .models import Vote, VotePackage
 from .serializers import (
     FailedPaymentCompensationSerializer,
+    ManualVoteReversalSerializer,
     VoteAdjustSerializer,
     VotePackageSerializer,
     VoteRecordSerializer,
@@ -79,6 +80,18 @@ class VoteAdjustView(APIView):
         serializer = VoteAdjustSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         vote = services.adjust_votes(request.user, request=request, **serializer.validated_data)
+        return Response(VoteRecordSerializer(vote).data, status=201)
+
+
+class ManualVoteReversalView(APIView):
+    permission_classes = [RBACPermission]
+    permission_map = {"POST": "votes.adjust"}
+
+    @extend_schema(tags=["votes"], request=ManualVoteReversalSerializer, responses={201: VoteRecordSerializer})
+    def post(self, request):
+        serializer = ManualVoteReversalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        vote = services.reverse_manual_votes(request.user, request=request, **serializer.validated_data)
         return Response(VoteRecordSerializer(vote).data, status=201)
 
 
