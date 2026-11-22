@@ -112,6 +112,9 @@ def adjust_votes(actor, *, candidate, phase=None, delta, reason, request=None):
     record(request=request, actor=actor, action=A.VOTE_ADJUSTED, module=M.VOTES,
            resource="vote", resource_id=vote.pk,
            metadata={"candidate": candidate.code, "delta": delta, "reason": reason})
+    from .events import broadcast_vote_update
+
+    transaction.on_commit(broadcast_vote_update, robust=True)
     return vote
 
 

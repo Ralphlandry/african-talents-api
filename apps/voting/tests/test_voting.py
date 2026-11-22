@@ -140,11 +140,30 @@ def test_manual_vote_adjustment_requires_reason(auth_client, make_role, make_use
     assert ok.status_code == 201 and ok.json()["source"] == "MANUAL_ADJUSTMENT"
 
 
+@pytest.mark.django_db(transaction=True)
+def test_manual_vote_adjustment_broadcasts_after_commit(
+    make_role, make_user, make_competition, make_category, make_candidate, monkeypatch,
+):
+    from apps.voting.services import adjust_votes
+
+    competition = make_competition()
+    category = make_category(competition=competition)
+    candidate = make_candidate(competition, category)
+    actor = make_user("votes-realtime@example.com", make_role("Votes", ["votes.adjust"]))
+    published = []
+    monkeypatch.setattr("apps.voting.events.broadcast_vote_update", lambda: published.append(True))
+
+    adjust_votes(actor, candidate=candidate, delta=5, reason="Correction de saisie")
+
+    assert published == [True]
+
+
 @pytest.mark.django_db
 def test_manual_vote_reversal_only_removes_available_manual_votes(
     auth_client, make_role, make_user, make_competition, make_category, make_candidate,
 ):
     from django.db.models import Sum
+
     from apps.voting.models import Vote
 
     competition = make_competition()

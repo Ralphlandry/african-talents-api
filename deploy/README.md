@@ -57,7 +57,18 @@ au minimum :
 - les clés de paiement et URLs de retour/webhook correspondant à l'environnement choisi.
 
 Le Compose de l'API lance PostgreSQL, Redis, l'API, Celery worker et Celery beat. Le backend
-exécute migrations et `collectstatic` au démarrage selon les variables de production.
+exécute migrations et `collectstatic` au démarrage selon les variables de production. Il sert
+également les connexions WebSocket du site public ; le proxy Nginx Hestia du domaine API doit
+transmettre les mises à niveau WebSocket vers le backend, avec HTTP/1.1, les en-têtes
+`Upgrade` et `Connection: upgrade`, et un délai de lecture suffisamment long. Dans la
+configuration du proxy API, prévoir notamment :
+
+```nginx
+proxy_http_version 1.1;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+proxy_read_timeout 3600s;
+```
 
 ### Site public et admin
 
